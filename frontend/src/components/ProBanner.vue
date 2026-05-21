@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAppStore } from '../stores/app'
+const store = useAppStore()
 </script>
 
 <template>
@@ -12,7 +14,10 @@
       </h2>
       <p class="text-white/65 mb-8 leading-relaxed text-sm max-w-sm">
         4K quality, batch downloads, AI summaries, subtitle translation and zero limits.
-        Starting at just <span class="text-white font-semibold">$9.9/month</span>.
+        Starting at just
+        <span class="text-white font-semibold">
+          {{ store.siteConfig.pro_monthly_price }}{{ store.siteConfig.pro_monthly_period }}
+        </span>.
       </p>
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <router-link

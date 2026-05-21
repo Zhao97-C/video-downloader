@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { parseVideo } from '../api'
+import { useAppStore } from '../stores/app'
 import VideoResult from './VideoResult.vue'
+
+const store = useAppStore()
 
 const url = ref('')
 const loading = ref(false)
@@ -93,7 +96,7 @@ async function handleSubmit() {
 
       <!-- Right side: free quota + paste -->
       <div class="flex items-center gap-2">
-        <span class="text-text-muted text-xs hidden sm:inline">3 free / day</span>
+        <span class="text-text-muted text-xs hidden sm:inline">{{ store.siteConfig.free_daily_limit }} free / day</span>
         <button
           @click="handlePaste"
           class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors border border-border"
@@ -107,7 +110,9 @@ async function handleSubmit() {
     </div>
 
     <!-- Free quota (mobile only) -->
-    <p class="mt-2 text-center text-text-muted text-xs sm:hidden">3 free downloads / day</p>
+    <p class="mt-2 text-center text-text-muted text-xs sm:hidden">
+      {{ store.siteConfig.free_daily_limit }} free downloads / day
+    </p>
 
     <!-- Error -->
     <div v-if="error" class="mt-5 p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm text-center">

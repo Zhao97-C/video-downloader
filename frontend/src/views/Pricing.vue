@@ -1,52 +1,83 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import FooterSection from '../components/FooterSection.vue'
+import { useAppStore } from '../stores/app'
 
-const plans = [
-  {
-    name: 'Free',
-    price: '$0',
-    period: 'forever',
-    features: [
-      '3 downloads per day',
-      'Up to 720p quality',
-      'Single video only',
-      'Standard speed',
-    ],
-    cta: 'Current Plan',
-    highlighted: false,
-  },
-  {
-    name: 'PRO Monthly',
-    price: '$9.9',
-    period: '/month',
-    features: [
-      'Unlimited downloads',
-      'Up to 4K quality',
-      'Batch & playlist downloads',
-      'AI video summaries',
-      'Subtitle translation',
-      'Priority processing',
-    ],
-    cta: 'Get PRO',
-    highlighted: true,
-  },
-  {
-    name: 'PRO Yearly',
-    price: '$99',
-    period: '/year',
-    badge: 'Save 17%',
-    features: [
-      'Everything in Monthly',
-      'Up to 4K quality',
-      'Batch & playlist downloads',
-      'AI video summaries',
-      'Subtitle translation',
-      'Priority processing',
-    ],
-    cta: 'Get PRO Yearly',
-    highlighted: false,
-  },
-]
+const store = useAppStore()
+
+const plans = computed(() => {
+  const cfg = store.siteConfig
+  return [
+    {
+      id: 'free',
+      name: 'Free',
+      price: '$0',
+      period: 'forever',
+      features: [
+        `${cfg.free_daily_limit} downloads per day`,
+        `Up to ${cfg.free_max_resolution}p quality`,
+        'Single video only',
+        'Standard speed',
+      ],
+      cta: 'Current Plan',
+      highlighted: false,
+      badge: null,
+    },
+    {
+      id: 'monthly',
+      name: 'PRO Monthly',
+      price: cfg.pro_monthly_price,
+      period: cfg.pro_monthly_period,
+      features: [
+        'Unlimited downloads',
+        'Up to 4K quality',
+        'Batch & playlist downloads',
+        'AI video summaries',
+        'Subtitle translation',
+        'Priority processing',
+      ],
+      cta: 'Get PRO',
+      highlighted: true,
+      badge: null,
+    },
+    {
+      id: 'yearly',
+      name: 'PRO Yearly',
+      price: cfg.pro_yearly_price,
+      period: cfg.pro_yearly_period,
+      features: [
+        'Everything in Monthly',
+        'Up to 4K quality',
+        'Batch & playlist downloads',
+        'AI video summaries',
+        'Subtitle translation',
+        'Priority processing',
+      ],
+      cta: 'Get PRO Yearly',
+      highlighted: false,
+      badge: cfg.pro_yearly_savings,
+    },
+  ]
+})
+
+async function handleCheckout(planId: string) {
+  if (planId === 'free') return
+  if (!store.siteConfig.payment_enabled) {
+    alert('Payment is not configured yet.')
+    return
+  }
+  if (!store.isLoggedIn) {
+    alert('Please sign in first.')
+    return
+  }
+  try {
+    const { createCheckout } = await import('../api')
+    const { checkout_url } = await createCheckout(planId)
+    window.location.href = checkout_url
+  } catch (e: any) {
+    alert(e.response?.data?.detail || 'Failed to start checkout.')
+  }
+}
 </script>
 
 <template>
@@ -65,7 +96,7 @@ const plans = [
         <div class="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6">
           <div
             v-for="plan in plans"
-            :key="plan.name"
+            :key="plan.id"
             :class="[
               'rounded-2xl p-8 border flex flex-col relative',
               plan.highlighted
@@ -109,11 +140,15 @@ const plans = [
             </ul>
 
             <button
+              @click="handleCheckout(plan.id)"
+              :disabled="plan.id === 'free'"
               :class="[
-                'w-full py-3 rounded-xl font-medium text-sm transition-all',
+                'w-full py-3 rounded-xl font-medium text-sm transition-all disabled:cursor-default',
                 plan.highlighted
                   ? 'bg-white text-accent hover:bg-gray-100'
-                  : 'accent-btn'
+                  : plan.id === 'free'
+                    ? 'bg-bg-input border border-border text-text-secondary'
+                    : 'accent-btn'
               ]"
             >
               {{ plan.cta }}

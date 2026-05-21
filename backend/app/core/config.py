@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     FREE_MAX_RESOLUTION: int = 720
     LARGE_FILE_THRESHOLD: int = 500 * 1024 * 1024  # 500MB
 
+    # Pricing display (shown to users; keep in sync with Stripe dashboard)
+    PRO_MONTHLY_PRICE_DISPLAY: str = "$9.9"
+    PRO_YEARLY_PRICE_DISPLAY: str = "$99"
+    PRO_YEARLY_SAVINGS_DISPLAY: str = "Save 17%"
+
+    # Site metadata
+    SITE_NAME: str = "SaveAny"
+
     class Config:
         env_file = ".env"
 

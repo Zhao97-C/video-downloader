@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import download, auth, payment, ai
+from app.api import download, auth, payment, ai, config
 from app.core.database import init_db
 
 
@@ -23,6 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(config.router, prefix="/api/config")
 app.include_router(download.router, prefix="/api")
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(payment.router, prefix="/api/payment")

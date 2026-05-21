@@ -53,3 +53,20 @@ export async function translateSubtitle(text: string, targetLanguage: string = '
   const res = await api.post('/ai/translate-subtitle', { text, target_language: targetLanguage })
   return res.data
 }
+
+export interface SiteConfig {
+  site_name: string
+  free_daily_limit: number
+  free_max_resolution: number
+  pro_monthly_price: string
+  pro_monthly_period: string
+  pro_yearly_price: string
+  pro_yearly_period: string
+  pro_yearly_savings: string
+  payment_enabled: boolean
+}
+
+export async function getSiteConfig(): Promise<SiteConfig> {
+  const res = await api.get('/config')
+  return res.data
+}

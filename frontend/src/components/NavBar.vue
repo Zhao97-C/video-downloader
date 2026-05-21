@@ -19,7 +19,7 @@ function isActive(path: string) {
   <!-- ─── Desktop Sidebar ─── -->
   <aside class="hidden md:flex flex-col fixed inset-y-0 left-0 w-[220px] bg-bg-card border-r border-border z-40">
     <!-- Logo -->
-    <div class="px-6 h-16 flex items-center border-b border-border flex-shrink-0">
+    <div class="px-5 h-16 flex items-center border-b border-border flex-shrink-0">
       <router-link to="/" class="flex items-center gap-2.5">
         <div class="w-7 h-7 bg-accent rounded-md flex items-center justify-center flex-shrink-0">
           <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -31,7 +31,7 @@ function isActive(path: string) {
     </div>
 
     <!-- Nav links -->
-    <nav class="flex-1 px-3 py-5 flex flex-col gap-1 overflow-y-auto">
+    <nav class="flex-1 px-4 py-5 flex flex-col gap-1 overflow-y-auto">
       <router-link
         to="/"
         :class="['flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
@@ -56,7 +56,7 @@ function isActive(path: string) {
     </nav>
 
     <!-- Bottom auth section -->
-    <div class="px-3 py-4 border-t border-border flex-shrink-0">
+    <div class="px-4 py-5 border-t border-border flex-shrink-0">
       <template v-if="store.isLoggedIn">
         <div class="px-3 py-2 mb-1">
           <div class="flex items-center gap-2 mb-1">

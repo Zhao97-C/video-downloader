@@ -51,18 +51,18 @@ const plans = [
 
 <template>
   <div class="flex flex-col min-h-screen">
-    <main class="flex-1 flex flex-col items-center px-4 sm:px-8 pt-24 md:pt-16 pb-20">
-      <div class="w-full max-w-5xl">
-        <div class="text-center mb-14 md:mb-16">
-          <h1 class="text-3xl md:text-4xl font-bold mb-3 text-text-primary tracking-tight">
+    <main class="flex-1 pt-24 md:pt-16 pb-20">
+      <div class="max-w-4xl mx-auto px-6 sm:px-10">
+        <div class="text-center pt-8 md:pt-12 mb-14 md:mb-16">
+          <h1 class="text-3xl md:text-4xl font-bold mb-4 text-text-primary tracking-tight">
             Simple Pricing
           </h1>
-          <p class="text-text-secondary text-base max-w-md mx-auto leading-relaxed">
+          <p class="text-text-secondary text-base leading-relaxed">
             Start free, upgrade when you need more power.
           </p>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6">
           <div
             v-for="plan in plans"
             :key="plan.name"
@@ -83,7 +83,7 @@ const plans = [
             <h3 :class="['text-base font-semibold mb-3', plan.highlighted ? 'text-white' : 'text-text-primary']">
               {{ plan.name }}
             </h3>
-            <div class="mb-7">
+            <div class="mb-8">
               <span :class="['text-4xl font-bold', plan.highlighted ? 'text-white' : 'text-text-primary']">
                 {{ plan.price }}
               </span>
@@ -96,7 +96,7 @@ const plans = [
               <li
                 v-for="feature in plan.features"
                 :key="feature"
-                :class="['flex items-start gap-2.5 text-sm', plan.highlighted ? 'text-white/80' : 'text-text-secondary']"
+                :class="['flex items-start gap-3 text-sm', plan.highlighted ? 'text-white/80' : 'text-text-secondary']"
               >
                 <svg
                   :class="['w-4 h-4 flex-shrink-0 mt-0.5', plan.highlighted ? 'text-white' : 'text-accent']"

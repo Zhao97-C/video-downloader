@@ -9,12 +9,16 @@ import FooterSection from '../components/FooterSection.vue'
 
 <template>
   <div class="flex flex-col min-h-screen">
-    <main class="flex-1 flex flex-col items-center px-4 sm:px-8 pt-24 md:pt-20">
-      <HeroSection />
-      <DownloadBox />
-      <PlatformShowcase />
-      <FeatureCards />
-      <ProBanner />
+    <main class="flex-1 pt-24 md:pt-16">
+      <!-- Single centered column – mx-auto handles centering correctly
+           inside the sidebar-offset content area -->
+      <div class="max-w-2xl mx-auto px-6 sm:px-10">
+        <HeroSection />
+        <DownloadBox />
+        <PlatformShowcase />
+        <FeatureCards />
+        <ProBanner />
+      </div>
     </main>
     <FooterSection />
   </div>

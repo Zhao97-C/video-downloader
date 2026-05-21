@@ -5,8 +5,8 @@ import NavBar from './components/NavBar.vue'
 <template>
   <div class="flex min-h-screen bg-bg-primary">
     <NavBar />
-    <!-- offset for sidebar on desktop -->
-    <div class="flex-1 md:pl-[220px] flex flex-col min-w-0">
+    <!-- sidebar-offset: plain CSS @media rule to shift content right on md+ -->
+    <div class="flex-1 min-w-0 overflow-x-hidden sidebar-offset">
       <router-view />
     </div>
   </div>

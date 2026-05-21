@@ -33,47 +33,47 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="flex-1 flex items-center justify-center px-4 pt-20 md:pt-0 pb-12">
+  <div class="flex-1 flex items-center justify-center px-6 sm:px-10 py-20">
     <div class="w-full max-w-sm">
-      <div class="rounded-2xl bg-bg-card border border-border p-8 shadow-sm">
+      <div class="rounded-2xl bg-bg-card border border-border p-8 sm:p-10 shadow-sm">
         <h1 class="text-2xl font-bold text-text-primary text-center mb-2 tracking-tight">
           {{ isLogin ? 'Welcome back' : 'Create account' }}
         </h1>
-        <p class="text-text-secondary text-sm text-center mb-7">
+        <p class="text-text-secondary text-sm text-center mb-8">
           {{ isLogin ? 'Sign in to access your downloads' : 'Start downloading in seconds' }}
         </p>
 
-        <form @submit.prevent="handleSubmit" class="space-y-4">
+        <form @submit.prevent="handleSubmit" class="space-y-5">
           <div>
-            <label class="text-text-secondary text-xs font-medium mb-1.5 block">Email</label>
+            <label class="text-text-secondary text-xs font-medium mb-2 block">Email</label>
             <input
               v-model="email"
               type="email"
               required
-              class="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-text-primary placeholder-text-muted outline-none focus:border-border-strong transition-colors text-sm"
+              class="w-full bg-bg-input border border-border rounded-xl px-4 py-3.5 text-text-primary placeholder-text-muted outline-none focus:border-border-strong transition-colors text-sm"
               placeholder="you@example.com"
             />
           </div>
           <div>
-            <label class="text-text-secondary text-xs font-medium mb-1.5 block">Password</label>
+            <label class="text-text-secondary text-xs font-medium mb-2 block">Password</label>
             <input
               v-model="password"
               type="password"
               required
               minlength="6"
-              class="w-full bg-bg-input border border-border rounded-xl px-4 py-3 text-text-primary placeholder-text-muted outline-none focus:border-border-strong transition-colors text-sm"
+              class="w-full bg-bg-input border border-border rounded-xl px-4 py-3.5 text-text-primary placeholder-text-muted outline-none focus:border-border-strong transition-colors text-sm"
               placeholder="••••••••"
             />
           </div>
 
-          <div v-if="error" class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs">
+          <div v-if="error" class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs">
             {{ error }}
           </div>
 
           <button
             type="submit"
             :disabled="loading"
-            class="accent-btn w-full py-3 rounded-xl font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            class="accent-btn w-full py-3.5 rounded-xl font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed mt-2"
           >
             {{ loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account') }}
           </button>

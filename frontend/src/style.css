@@ -25,30 +25,31 @@
   --color-pro-border: #fde68a;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Put resets inside @layer base so Tailwind utilities can override them */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html {
-  color-scheme: light;
-}
+  html {
+    color-scheme: light;
+  }
 
-body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-#app {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  #app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 /* Primary action button – black */
@@ -119,4 +120,11 @@ body {
 
 .nav-link:hover {
   color: var(--color-text-primary);
+}
+
+/* Offset content area to account for fixed sidebar on desktop */
+@media (min-width: 768px) {
+  .sidebar-offset {
+    padding-left: 220px;
+  }
 }

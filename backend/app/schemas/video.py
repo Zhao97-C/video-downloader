@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ParseRequest(BaseModel):
@@ -24,3 +24,13 @@ class ParseResponse(BaseModel):
     platform: str | None = None
     formats: list[FormatInfo]
     task_id: str
+
+    @field_validator("duration", mode="before")
+    @classmethod
+    def duration_to_int(cls, v):
+        if v is None:
+            return None
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None

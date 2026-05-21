@@ -1,4 +1,11 @@
+import os
+import tempfile
+
 from pydantic_settings import BaseSettings
+
+
+def _default_download_dir() -> str:
+    return os.path.join(tempfile.gettempdir(), "saveany-downloads")
 
 
 class Settings(BaseSettings):
@@ -15,7 +22,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./saveany.db"
 
-    DOWNLOAD_DIR: str = "/tmp/downloads"
+    DOWNLOAD_DIR: str = _default_download_dir()
     MAX_CONCURRENT_DOWNLOADS: int = 5
     TEMP_FILE_EXPIRY_MINUTES: int = 30
     FREE_DAILY_LIMIT: int = 3

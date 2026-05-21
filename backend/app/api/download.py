@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from yt_dlp import YoutubeDL
 
 from app.schemas.video import ParseRequest, ParseResponse
-from app.services.download import parse_video, download_video, get_task
+from app.services.download import parse_video, download_video, get_task, _resolve_ffmpeg_location
 from app.core.config import settings
 
 router = APIRouter()
@@ -44,31 +44,7 @@ async def download(task_id: str, format_id: str = Query(...)):
         )
 
     elif result["mode"] == "stream":
-
-        async def stream_download():
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "format": result["format_id"],
-                "outtmpl": "-",
-            }
-            proc = await asyncio.create_subprocess_exec(
-                "yt-dlp",
-                "-f", result["format_id"],
-                "-o", "-",
-                result["url"],
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            while True:
-                chunk = await proc.stdout.read(1024 * 64)
-                if not chunk:
-                    break
-                yield chunk
-            await proc.wait()
-
-        return StreamingResponse(
-            stream_download(),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="video.mp4"'},
+        raise HTTPException(
+            status_code=501,
+            detail="Large file streaming is not supported for this format. Try a lower quality.",
         )

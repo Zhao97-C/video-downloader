@@ -51,7 +51,7 @@ const aiLoading = ref(false)
 const translateResult = ref('')
 const translateLoading = ref(false)
 
-function handleDownload(format: FormatInfo) {
+async function handleDownload(format: FormatInfo) {
   if (format.is_pro) {
     alert('This quality requires a PRO subscription. Upgrade to unlock!')
     return
@@ -59,13 +59,28 @@ function handleDownload(format: FormatInfo) {
   selectedFormat.value = format.format_id
   downloading.value = true
 
-  const url = `/api/download/${props.data.task_id}?format_id=${format.format_id}`
-  window.open(url, '_blank')
-
-  setTimeout(() => {
+  const url = `/api/download/${props.data.task_id}?format_id=${encodeURIComponent(format.format_id)}`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Download failed (${res.status})`)
+    }
+    const blob = await res.blob()
+    const filename = `${props.data.title.replace(/[<>:"/\\|?*]/g, '_')}.${format.ext || 'mp4'}`
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Download failed'
+    alert(msg)
+  } finally {
     downloading.value = false
     selectedFormat.value = ''
-  }, 3000)
+  }
 }
 
 async function handleSummarize() {

@@ -4,6 +4,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from yt_dlp import YoutubeDL
 
+import httpx
+from urllib.parse import unquote
+
 from app.schemas.video import ParseRequest, ParseResponse
 from app.services.download import parse_video, download_video, get_task, _resolve_ffmpeg_location
 from app.core.config import settings
@@ -48,3 +51,22 @@ async def download(task_id: str, format_id: str = Query(...)):
             status_code=501,
             detail="Large file streaming is not supported for this format. Try a lower quality.",
         )
+
+
+@router.get("/proxy-image")
+async def proxy_image(url: str = Query(...)):
+    """Proxy external thumbnail images to bypass hotlink restrictions (e.g. Bilibili)."""
+    decoded = unquote(url)
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(decoded, headers={"Referer": decoded})
+            resp.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch image: {str(e)}")
+
+    content_type = resp.headers.get("content-type", "image/jpeg")
+    return StreamingResponse(
+        resp.aiter_bytes(),
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

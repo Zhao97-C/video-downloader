@@ -121,7 +121,7 @@ async function handleTranslate() {
     <!-- Video Info -->
     <div class="flex gap-4 p-5">
       <div v-if="data.thumbnail" class="flex-shrink-0 w-28 h-[72px] md:w-40 md:h-24 rounded-lg overflow-hidden bg-bg-secondary">
-        <img :src="data.thumbnail" :alt="data.title" class="w-full h-full object-cover" />
+        <img :src="`/api/proxy-image?url=${encodeURIComponent(data.thumbnail)}`" :alt="data.title" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
       </div>
       <div class="flex-1 min-w-0">
         <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-2 mb-2 leading-snug">

@@ -1,16 +1,28 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-purple: #7c3aed;
-  --color-brand-blue: #3b82f6;
-  --color-brand-pink: #ec4899;
-  --color-bg-primary: #0a0a0f;
-  --color-bg-secondary: #12121a;
-  --color-bg-card: #1a1a2e;
-  --color-bg-input: #16162a;
-  --color-text-primary: #f1f1f6;
-  --color-text-secondary: #9ca3af;
-  --color-border: #2a2a3e;
+  /* Light theme – cobalt-inspired monochrome */
+  --color-bg-primary: #f6f6f6;
+  --color-bg-secondary: #eeeeee;
+  --color-bg-card: #ffffff;
+  --color-bg-input: #ebebeb;
+  --color-bg-sidebar: #ffffff;
+
+  --color-text-primary: #111111;
+  --color-text-secondary: #777777;
+  --color-text-muted: #aaaaaa;
+
+  --color-border: #e5e5e5;
+  --color-border-strong: #cccccc;
+
+  /* Black accent – no purple/blue */
+  --color-accent: #111111;
+  --color-accent-2: #333333;
+
+  /* Amber for PRO – premium, warm */
+  --color-pro: #d97706;
+  --color-pro-light: #fffbeb;
+  --color-pro-border: #fde68a;
 }
 
 * {
@@ -19,12 +31,18 @@
   box-sizing: border-box;
 }
 
+html {
+  color-scheme: light;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   min-height: 100vh;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #app {
@@ -33,57 +51,72 @@ body {
   flex-direction: column;
 }
 
-.gradient-text {
-  background: linear-gradient(135deg, var(--color-brand-purple), var(--color-brand-blue));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* Primary action button – black */
+.accent-btn {
+  background-color: var(--color-accent);
+  color: #ffffff;
+  transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
-.gradient-border {
-  position: relative;
-  border-radius: 1rem;
-}
-
-.gradient-border::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background: linear-gradient(135deg, var(--color-brand-purple), var(--color-brand-blue));
-  z-index: -1;
-  opacity: 0.5;
-}
-
-.gradient-btn {
-  background: linear-gradient(135deg, var(--color-brand-purple), var(--color-brand-blue));
-  transition: all 0.3s ease;
-}
-
-.gradient-btn:hover {
-  opacity: 0.9;
+.accent-btn:hover {
+  background-color: var(--color-accent-2);
   transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(124, 58, 237, 0.3);
 }
 
-.glow {
-  box-shadow: 0 0 40px rgba(124, 58, 237, 0.15), 0 0 80px rgba(59, 130, 246, 0.08);
+.accent-btn:active {
+  transform: translateY(0);
 }
 
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(124, 58, 237, 0.2); }
-  50% { box-shadow: 0 0 40px rgba(124, 58, 237, 0.4), 0 0 60px rgba(59, 130, 246, 0.2); }
+/* PRO badge */
+.pro-badge {
+  background-color: var(--color-pro-light);
+  color: var(--color-pro);
+  border: 1px solid var(--color-pro-border);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 3s ease-in-out infinite;
+/* Subtle card hover */
+.card-hover {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+.card-hover:hover {
+  border-color: var(--color-border-strong) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
-.animate-float {
-  animation: float 4s ease-in-out infinite;
+/* Mode pill selected */
+.mode-pill-active {
+  background-color: var(--color-accent);
+  color: #ffffff;
+}
+
+.mode-pill-inactive {
+  background-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.mode-pill-inactive:hover {
+  background-color: var(--color-bg-input);
+  color: var(--color-text-primary);
+}
+
+/* Sidebar active link */
+.nav-link-active {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.nav-link {
+  color: var(--color-text-secondary);
+  transition: color 0.15s ease;
+}
+
+.nav-link:hover {
+  color: var(--color-text-primary);
 }

@@ -102,16 +102,20 @@ async function handleTranslate() {
 </script>
 
 <template>
-  <div class="rounded-xl bg-bg-card border border-border overflow-hidden animate-in fade-in">
-    <!-- Video Info Header -->
-    <div class="flex gap-4 p-4">
-      <div v-if="data.thumbnail" class="flex-shrink-0 w-32 h-20 md:w-48 md:h-28 rounded-lg overflow-hidden bg-bg-secondary">
+  <div class="rounded-2xl bg-bg-card border border-border overflow-hidden shadow-sm">
+    <!-- Video Info -->
+    <div class="flex gap-4 p-5">
+      <div v-if="data.thumbnail" class="flex-shrink-0 w-28 h-[72px] md:w-40 md:h-24 rounded-lg overflow-hidden bg-bg-secondary">
         <img :src="data.thumbnail" :alt="data.title" class="w-full h-full object-cover" />
       </div>
       <div class="flex-1 min-w-0">
-        <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-2 mb-2">{{ data.title }}</h3>
-        <div class="flex items-center gap-3 text-text-secondary text-xs">
-          <span v-if="data.platform" class="px-2 py-0.5 rounded bg-bg-secondary capitalize">{{ data.platform }}</span>
+        <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-2 mb-2 leading-snug">
+          {{ data.title }}
+        </h3>
+        <div class="flex items-center gap-2 text-xs text-text-secondary">
+          <span v-if="data.platform" class="px-2 py-0.5 rounded-md bg-bg-input capitalize">
+            {{ data.platform }}
+          </span>
           <span>{{ formatDuration(data.duration) }}</span>
         </div>
       </div>
@@ -120,7 +124,7 @@ async function handleTranslate() {
     <!-- Format Selection -->
     <div class="border-t border-border">
       <!-- Video Formats -->
-      <div v-if="videoFormats.length" class="p-4">
+      <div v-if="videoFormats.length" class="p-5">
         <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Video</h4>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
           <button
@@ -129,24 +133,21 @@ async function handleTranslate() {
             @click="handleDownload(fmt)"
             :disabled="downloading && selectedFormat === fmt.format_id"
             :class="[
-              'relative px-3 py-2.5 rounded-lg text-left transition-all text-sm border',
+              'relative px-3 py-3 rounded-xl text-left transition-all text-sm border',
               fmt.is_pro
-                ? 'border-brand-purple/30 bg-brand-purple/5 hover:bg-brand-purple/10'
-                : 'border-border bg-bg-secondary hover:bg-bg-input hover:border-brand-blue/50'
+                ? 'border-pro/30 bg-pro-light hover:bg-yellow-100'
+                : 'border-border bg-bg-input hover:border-border-strong card-hover'
             ]"
           >
-            <div class="flex items-center justify-between">
-              <span class="font-medium text-text-primary">{{ fmt.resolution }}</span>
-              <span
-                v-if="fmt.is_pro"
-                class="text-[9px] font-bold px-1 py-0.5 rounded bg-brand-purple/20 text-brand-purple"
-              >PRO</span>
+            <div class="flex items-center justify-between mb-0.5">
+              <span class="font-semibold text-text-primary text-sm">{{ fmt.resolution }}</span>
+              <span v-if="fmt.is_pro" class="pro-badge">PRO</span>
             </div>
-            <div class="text-text-secondary text-xs mt-0.5">
+            <div class="text-text-secondary text-xs">
               {{ fmt.ext.toUpperCase() }} · {{ formatFileSize(fmt.filesize) }}
             </div>
-            <div v-if="downloading && selectedFormat === fmt.format_id" class="absolute inset-0 flex items-center justify-center bg-bg-card/80 rounded-lg">
-              <svg class="w-4 h-4 animate-spin text-brand-purple" fill="none" viewBox="0 0 24 24">
+            <div v-if="downloading && selectedFormat === fmt.format_id" class="absolute inset-0 flex items-center justify-center bg-bg-card/80 rounded-xl">
+              <svg class="w-4 h-4 animate-spin text-text-secondary" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
               </svg>
@@ -156,54 +157,50 @@ async function handleTranslate() {
       </div>
 
       <!-- Audio Formats -->
-      <div v-if="audioFormats.length" class="p-4 border-t border-border">
+      <div v-if="audioFormats.length" class="p-5 border-t border-border">
         <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Audio Only</h4>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
           <button
             v-for="fmt in audioFormats"
             :key="fmt.format_id"
             @click="handleDownload(fmt)"
-            :disabled="downloading && selectedFormat === fmt.format_id"
-            class="px-3 py-2.5 rounded-lg text-left transition-all text-sm border border-border bg-bg-secondary hover:bg-bg-input hover:border-brand-blue/50"
+            class="px-3 py-3 rounded-xl text-left transition-all text-sm border border-border bg-bg-input hover:border-border-strong card-hover"
           >
-            <div class="font-medium text-text-primary">{{ fmt.ext.toUpperCase() }}</div>
-            <div class="text-text-secondary text-xs mt-0.5">
-              {{ fmt.acodec }} · {{ formatFileSize(fmt.filesize) }}
-            </div>
+            <div class="font-semibold text-text-primary text-sm mb-0.5">{{ fmt.ext.toUpperCase() }}</div>
+            <div class="text-text-secondary text-xs">{{ fmt.acodec }} · {{ formatFileSize(fmt.filesize) }}</div>
           </button>
         </div>
       </div>
 
       <!-- AI Features -->
-      <div class="p-4 border-t border-border">
-        <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">
-          AI Tools
-          <span class="ml-1 text-[9px] font-bold px-1 py-0.5 rounded bg-brand-purple/20 text-brand-purple">PRO</span>
+      <div class="p-5 border-t border-border">
+        <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-2">
+          AI Tools <span class="pro-badge">PRO</span>
         </h4>
         <div class="flex gap-2 flex-wrap">
           <button
             @click="handleSummarize"
             :disabled="aiLoading"
-            class="px-4 py-2 rounded-lg text-sm border border-brand-purple/30 bg-brand-purple/5 hover:bg-brand-purple/10 text-text-primary transition-all disabled:opacity-50"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
           >
-            {{ aiLoading ? '⏳ Summarizing...' : '🧠 AI Summary' }}
+            {{ aiLoading ? 'Summarizing...' : 'AI Summary' }}
           </button>
           <button
             @click="handleTranslate"
             :disabled="translateLoading"
-            class="px-4 py-2 rounded-lg text-sm border border-brand-blue/30 bg-brand-blue/5 hover:bg-brand-blue/10 text-text-primary transition-all disabled:opacity-50"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
           >
-            {{ translateLoading ? '⏳ Translating...' : '🌐 Translate Subtitles' }}
+            {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
           </button>
         </div>
 
-        <div v-if="aiSummary" class="mt-3 p-3 rounded-lg bg-bg-secondary border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
-          <div class="font-medium text-text-primary mb-1">📝 Summary</div>
+        <div v-if="aiSummary" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
+          <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Summary</div>
           {{ aiSummary }}
         </div>
 
-        <div v-if="translateResult" class="mt-3 p-3 rounded-lg bg-bg-secondary border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
-          <div class="font-medium text-text-primary mb-1">🌐 Translation</div>
+        <div v-if="translateResult" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
+          <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Translation</div>
           {{ translateResult }}
         </div>
       </div>

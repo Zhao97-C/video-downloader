@@ -2,31 +2,26 @@
 </script>
 
 <template>
-  <div class="w-full max-w-3xl mx-auto mb-16">
-    <div class="relative overflow-hidden rounded-2xl p-8 md:p-12 bg-gradient-to-br from-brand-purple/20 via-bg-card to-brand-blue/20 border border-brand-purple/30">
-      <div class="absolute top-0 right-0 w-64 h-64 bg-brand-purple/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-      <div class="absolute bottom-0 left-0 w-48 h-48 bg-brand-blue/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
-
-      <div class="relative z-10 text-center">
-        <div class="inline-block px-3 py-1 rounded-full bg-brand-purple/20 text-brand-purple text-xs font-bold uppercase tracking-wider mb-4">
-          Limited Offer
-        </div>
-        <h2 class="text-2xl md:text-3xl font-bold mb-3">
-          Unlock <span class="gradient-text">Unlimited Downloads</span>
-        </h2>
-        <p class="text-text-secondary mb-6 max-w-lg mx-auto">
-          Get 4K quality, batch downloads, AI summaries, subtitle translation and zero limits.
-          Starting at just <span class="text-text-primary font-semibold">$9.9/month</span>.
-        </p>
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <router-link
-            to="/pricing"
-            class="gradient-btn text-white px-8 py-3 rounded-xl font-semibold text-base animate-pulse-glow"
-          >
-            Upgrade to PRO →
-          </router-link>
-          <span class="text-text-secondary text-sm">Cancel anytime · 7-day money back</span>
-        </div>
+  <div class="w-full max-w-2xl mx-auto mb-24 md:mb-32">
+    <div class="rounded-2xl bg-accent p-10 md:p-12 text-white">
+      <div class="inline-block px-2.5 py-1 rounded-md bg-white/15 text-white text-xs font-semibold uppercase tracking-wider mb-4">
+        Limited Offer
+      </div>
+      <h2 class="text-2xl md:text-3xl font-bold mb-3 leading-tight">
+        Unlock unlimited downloads
+      </h2>
+      <p class="text-white/70 mb-8 max-w-md leading-relaxed text-sm">
+        4K quality, batch downloads, AI summaries, subtitle translation and zero limits.
+        Starting at just <span class="text-white font-semibold">$9.9/month</span>.
+      </p>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <router-link
+          to="/pricing"
+          class="inline-flex items-center gap-2 bg-white text-accent px-7 py-3 rounded-xl font-semibold text-sm hover:bg-gray-100 transition-colors"
+        >
+          Upgrade to PRO →
+        </router-link>
+        <span class="text-white/50 text-xs">Cancel anytime · 7-day money back</span>
       </div>
     </div>
   </div>

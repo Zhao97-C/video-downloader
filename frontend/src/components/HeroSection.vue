@@ -2,13 +2,13 @@
 </script>
 
 <template>
-  <div class="text-center mb-8 md:mb-12">
-    <h1 class="text-4xl md:text-6xl font-bold mb-4 tracking-tight">
-      <span class="gradient-text">Save Any Video</span>
+  <div class="text-center mb-10 md:mb-14 w-full max-w-2xl">
+    <h1 class="text-4xl md:text-5xl font-bold mb-4 tracking-tight text-text-primary leading-tight">
+      Save any video
     </h1>
-    <p class="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
-      Download videos from <span class="text-text-primary font-medium">any platform</span> in the highest quality.
-      Fast, free, and works everywhere.
+    <p class="text-text-secondary text-base md:text-lg max-w-lg mx-auto leading-relaxed">
+      Paste a link from YouTube, TikTok, Instagram and 1000+ other platforms —
+      download it in the best available quality.
     </p>
   </div>
 </template>

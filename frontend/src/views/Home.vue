@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import NavBar from '../components/NavBar.vue'
 import HeroSection from '../components/HeroSection.vue'
 import DownloadBox from '../components/DownloadBox.vue'
 import PlatformShowcase from '../components/PlatformShowcase.vue'
@@ -10,9 +8,8 @@ import FooterSection from '../components/FooterSection.vue'
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col">
-    <NavBar />
-    <main class="flex-1 flex flex-col items-center justify-start px-4 pt-16 md:pt-24">
+  <div class="flex flex-col min-h-screen">
+    <main class="flex-1 flex flex-col items-center px-4 sm:px-8 pt-24 md:pt-20">
       <HeroSection />
       <DownloadBox />
       <PlatformShowcase />

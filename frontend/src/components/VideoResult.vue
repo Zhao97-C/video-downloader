@@ -90,7 +90,7 @@ async function handleSummarize() {
   }
   aiLoading.value = true
   try {
-    const res = await summarizeVideo(props.data.title, `Video: ${props.data.title}`)
+    const res = await summarizeVideo(props.data.task_id)
     aiSummary.value = res.result
   } catch (e: any) {
     aiSummary.value = `Error: ${e.response?.data?.detail || 'Failed to generate summary'}`

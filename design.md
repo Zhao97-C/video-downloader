@@ -171,3 +171,63 @@ video-downloader/
 - **下载策略智能判断**：先 extract_info 获取直链，检测是否可直接访问（HEAD 请求验证），再决定采用哪种下载模式
 - **临时文件管理**：代理下载的文件存放在 `/tmp/downloads/`，设置 30 分钟自动清理
 - **并发控制**：使用 asyncio Semaphore 限制同时下载数，防止服务器过载
+
+## 九、视频总结功能 - DeepSeek 接入
+
+### 9.1 方案概述
+
+用 DeepSeek API 替换原有 OpenAI (`gpt-4o-mini`)，并实现"解析视频 → 提取字幕 → AI 总结"完整链路。
+
+前端只需传 `task_id`，后端自动完成字幕提取与总结生成。
+
+### 9.2 技术选型
+
+- **模型**：`deepseek-chat`（DeepSeek V3），适合总结/翻译任务，速度快、成本低
+- **SDK**：复用 `openai.AsyncOpenAI`，DeepSeek API 完全兼容 OpenAI 协议
+- **参数差异**：仅改 `base_url`（`https://api.deepseek.com`）、`api_key`、`model`，无需额外依赖
+
+### 9.3 字幕提取策略
+
+通过 yt-dlp 的 `writesubtitles` / `writeautosub` 参数提取字幕：
+
+- 优先使用**自动生成字幕**（YouTube、B站 等大部分平台支持）
+- 无字幕时降级到视频描述（`description`）
+- 字幕文本截断到 8000 字符（兼顾 DeepSeek 上下文与总结质量）
+- 提取操作在 `ThreadPoolExecutor` 中执行（与下载逻辑一致）
+
+### 9.4 API 设计
+
+改造现有 `POST /api/ai/summarize`：
+
+| 维度 | 改前 | 改后 |
+|------|------|------|
+| 请求体 | `{ title, subtitles }` | `{ task_id }` |
+| 字幕来源 | 前端自行传入（实际传的是假数据） | 后端从视频自动提取 |
+| 响应 | `{ result }` | `{ result }`（不变） |
+
+数据流：
+
+```
+POST /api/parse (解析视频) → task_id
+  → 用户点击 "AI Summary"
+  → POST /api/ai/summarize { task_id }
+  → yt-dlp 提取字幕 (ThreadPoolExecutor)
+  → DeepSeek chat.completions 生成总结
+  → { result: "结构化总结..." }
+```
+
+### 9.5 改动范围
+
+| 文件 | 改动 |
+|------|------|
+| `backend/app/core/config.py` | 新增 `DEEPSEEK_API_KEY` |
+| `backend/.env` / `.env.example` | 新增 `DEEPSEEK_API_KEY=` |
+| `backend/app/services/ai.py` | DeepSeek 客户端 + `extract_subtitles()` + 改 model |
+| `backend/app/api/ai.py` | `SummarizeRequest` 改为接收 `task_id` |
+| `frontend/src/api/index.ts` | `summarizeVideo()` 改为接收 `taskId` |
+| `frontend/src/components/VideoResult.vue` | `handleSummarize()` 传入 `task_id` |
+
+### 9.6 定价与权限
+
+- AI 总结功能仅 PRO 用户可用（保持不变）
+- DeepSeek 成本极低（约为 GPT-4o-mini 的 1/10），不会对盈利能力产生实质影响

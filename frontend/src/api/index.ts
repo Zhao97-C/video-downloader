@@ -44,8 +44,8 @@ export async function createCheckout(plan: string = 'monthly') {
   return res.data
 }
 
-export async function summarizeVideo(title: string, subtitles: string) {
-  const res = await api.post('/ai/summarize', { title, subtitles })
+export async function summarizeVideo(taskId: string) {
+  const res = await api.post('/ai/summarize', { task_id: taskId })
   return res.data
 }
 

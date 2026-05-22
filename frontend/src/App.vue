@@ -4,6 +4,7 @@ import NavBar from './components/NavBar.vue'
 
 const store = useAppStore()
 store.fetchConfig()
+if (store.token) store.fetchProfile()
 </script>
 
 <template>

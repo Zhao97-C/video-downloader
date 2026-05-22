@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     STRIPE_PRO_YEARLY_PRICE_ID: str = ""
 
     OPENAI_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = ""
+
+    # Comma-separated emails that get full-feature access without paid subscription
+    FEATURE_WHITELIST_EMAILS: str = ""
+
+    @property
+    def whitelist_emails(self) -> set[str]:
+        return {e.strip().lower() for e in self.FEATURE_WHITELIST_EMAILS.split(",") if e.strip()}
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./saveany.db"
 

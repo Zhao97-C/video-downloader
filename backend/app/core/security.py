@@ -6,6 +6,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.config import settings
 
+from app.core.config import settings
+
 security_scheme = HTTPBearer(auto_error=False)
 
 
@@ -32,6 +34,14 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+def _apply_whitelist(payload: dict) -> dict:
+    """Override is_pro for whitelisted emails."""
+    email = payload.get("email", "")
+    if email.lower() in settings.whitelist_emails:
+        payload["is_pro"] = True
+    return payload
+
+
 async def get_current_user_optional(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
 ) -> dict | None:
@@ -40,7 +50,7 @@ async def get_current_user_optional(
     payload = decode_token(credentials.credentials)
     if payload is None:
         return None
-    return payload
+    return _apply_whitelist(payload)
 
 
 async def get_current_user(
@@ -51,4 +61,4 @@ async def get_current_user(
     payload = decode_token(credentials.credentials)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    return payload
+    return _apply_whitelist(payload)

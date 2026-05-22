@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { summarizeVideo, translateSubtitle } from '../api'
+import { useRouter } from 'vue-router'
+import {
+  summarizeVideo,
+  translateSubtitle,
+  fetchSubtitles,
+  type SubtitlesResponse,
+} from '../api'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
+const router = useRouter()
 
 interface FormatInfo {
   format_id: string
@@ -23,6 +30,8 @@ interface VideoData {
   platform: string | null
   formats: FormatInfo[]
   task_id: string
+  has_subtitles?: boolean
+  subtitle_languages?: string[] | null
 }
 
 const props = defineProps<{ data: VideoData }>()
@@ -31,6 +40,22 @@ const selectedFormat = ref<string>('')
 
 const videoFormats = computed(() => props.data.formats.filter(f => f.resolution))
 const audioFormats = computed(() => props.data.formats.filter(f => !f.resolution))
+
+const subtitleBadge = computed(() => {
+  if (props.data.has_subtitles && props.data.subtitle_languages?.length) {
+    const langs = props.data.subtitle_languages.slice(0, 3).join(', ')
+    return `Subtitles · ${langs}`
+  }
+  if (props.data.has_subtitles) return 'Subtitles available'
+  return 'Subtitles may be unavailable'
+})
+
+const sourceLabel: Record<string, string> = {
+  auto_subtitle: 'Auto-generated',
+  manual_subtitle: 'Manual',
+  description: 'From description',
+  none: 'None',
+}
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--:--'
@@ -46,10 +71,36 @@ function formatFileSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+function formatCueTime(seconds: number): string {
+  const total = Math.floor(seconds)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
+
 const aiSummary = ref('')
 const aiLoading = ref(false)
 const translateResult = ref('')
 const translateLoading = ref(false)
+const translateLang = ref('Chinese')
+
+const subtitles = ref<SubtitlesResponse | null>(null)
+const subtitlesLoading = ref(false)
+const subtitlesError = ref('')
+const showPlainText = ref(false)
+const subtitlesLoaded = ref(false)
+
+const displayLines = computed(() => {
+  if (!subtitles.value) return []
+  if (showPlainText.value || !subtitles.value.segments.length) {
+    return subtitles.value.plain_text.split('\n').filter(Boolean)
+  }
+  return subtitles.value.segments.map(
+    seg => `${formatCueTime(seg.start)}  ${seg.text}`,
+  )
+})
 
 async function handleDownload(format: FormatInfo) {
   if (format.is_pro) {
@@ -83,6 +134,45 @@ async function handleDownload(format: FormatInfo) {
   }
 }
 
+function promptLogin() {
+  const go = confirm('Sign in to view subtitles and copy transcript text.')
+  if (go) router.push('/auth')
+}
+
+async function handleLoadSubtitles() {
+  if (!store.isLoggedIn) {
+    promptLogin()
+    return
+  }
+  subtitlesLoading.value = true
+  subtitlesError.value = ''
+  try {
+    subtitles.value = await fetchSubtitles(props.data.task_id)
+    subtitlesLoaded.value = true
+    showPlainText.value = false
+  } catch (e: any) {
+    subtitlesError.value = e.response?.data?.detail || 'Failed to load subtitles'
+  } finally {
+    subtitlesLoading.value = false
+  }
+}
+
+async function handleCopySubtitles() {
+  if (!store.isLoggedIn) {
+    promptLogin()
+    return
+  }
+  if (!subtitles.value) {
+    await handleLoadSubtitles()
+  }
+  if (!subtitles.value?.plain_text) return
+  try {
+    await navigator.clipboard.writeText(subtitles.value.plain_text)
+  } catch {
+    alert('Could not copy to clipboard')
+  }
+}
+
 async function handleSummarize() {
   if (!store.isLoggedIn || !store.user?.isPro) {
     alert('AI Summary requires a PRO subscription.')
@@ -106,7 +196,7 @@ async function handleTranslate() {
   }
   translateLoading.value = true
   try {
-    const res = await translateSubtitle(`Video: ${props.data.title}`, 'Chinese')
+    const res = await translateSubtitle(props.data.task_id, translateLang.value)
     translateResult.value = res.result
   } catch (e: any) {
     translateResult.value = `Error: ${e.response?.data?.detail || 'Failed to translate'}`
@@ -127,11 +217,17 @@ async function handleTranslate() {
         <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-2 mb-2 leading-snug">
           {{ data.title }}
         </h3>
-        <div class="flex items-center gap-2 text-xs text-text-secondary">
+        <div class="flex flex-wrap items-center gap-2 text-xs text-text-secondary">
           <span v-if="data.platform" class="px-2 py-0.5 rounded-md bg-bg-input capitalize">
             {{ data.platform }}
           </span>
           <span>{{ formatDuration(data.duration) }}</span>
+          <span
+            class="px-2 py-0.5 rounded-md"
+            :class="data.has_subtitles ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-bg-input text-text-muted'"
+          >
+            {{ subtitleBadge }}
+          </span>
         </div>
       </div>
     </div>
@@ -187,12 +283,83 @@ async function handleTranslate() {
         </div>
       </div>
 
+      <!-- Subtitles / Transcript -->
+      <div class="p-5 border-t border-border">
+        <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">
+          Subtitles / Transcript
+        </h4>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <button
+            @click="handleLoadSubtitles"
+            :disabled="subtitlesLoading"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
+          >
+            {{ subtitlesLoading ? 'Loading...' : subtitlesLoaded ? 'Reload' : 'View Subtitles' }}
+          </button>
+          <button
+            v-if="subtitlesLoaded && subtitles?.plain_text"
+            @click="handleCopySubtitles"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
+          >
+            Copy
+          </button>
+          <button
+            v-if="subtitlesLoaded && subtitles?.segments?.length"
+            @click="showPlainText = !showPlainText"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-secondary transition-all"
+          >
+            {{ showPlainText ? 'Show timestamps' : 'Plain text only' }}
+          </button>
+        </div>
+
+        <div v-if="subtitlesError" class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
+          {{ subtitlesError }}
+        </div>
+
+        <div
+          v-else-if="subtitlesLoaded && subtitles"
+          class="rounded-xl border border-border bg-bg-input overflow-hidden"
+        >
+          <div class="px-4 py-2 border-b border-border flex flex-wrap gap-2 text-xs text-text-secondary">
+            <span v-if="subtitles.language" class="px-2 py-0.5 rounded-md bg-bg-card">{{ subtitles.language }}</span>
+            <span class="px-2 py-0.5 rounded-md bg-bg-card">{{ sourceLabel[subtitles.source] || subtitles.source }}</span>
+            <span v-if="subtitles.extraction_method" class="px-2 py-0.5 rounded-md bg-bg-card capitalize">
+              via {{ subtitles.extraction_method.replace('_', ' ') }}
+            </span>
+            <span v-if="subtitles.truncated" class="text-amber-600">Truncated preview</span>
+          </div>
+
+          <div
+            v-if="subtitles.source === 'description'"
+            class="px-4 py-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-100"
+          >
+            No timed subtitles found — showing video description instead.
+          </div>
+
+          <div
+            v-if="subtitles.source === 'none'"
+            class="p-4 text-sm text-text-secondary"
+          >
+            No subtitles or transcript available for this video.
+          </div>
+
+          <div
+            v-else
+            class="p-4 max-h-[40vh] overflow-y-auto text-sm text-text-secondary leading-relaxed font-mono tabular-nums space-y-1"
+          >
+            <p v-for="(line, i) in displayLines" :key="i" class="whitespace-pre-wrap break-words">
+              {{ line }}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- AI Features -->
       <div class="p-5 border-t border-border">
         <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-2">
           AI Tools <span class="pro-badge">PRO</span>
         </h4>
-        <div class="flex gap-2 flex-wrap">
+        <div class="flex gap-2 flex-wrap items-center">
           <button
             @click="handleSummarize"
             :disabled="aiLoading"
@@ -200,12 +367,22 @@ async function handleTranslate() {
           >
             {{ aiLoading ? 'Summarizing...' : 'AI Summary' }}
           </button>
+          <select
+            v-model="translateLang"
+            class="px-3 py-2 rounded-lg text-sm border border-border bg-bg-input text-text-primary"
+          >
+            <option value="Chinese">Chinese</option>
+            <option value="English">English</option>
+            <option value="Japanese">Japanese</option>
+            <option value="Korean">Korean</option>
+            <option value="Spanish">Spanish</option>
+          </select>
           <button
             @click="handleTranslate"
             :disabled="translateLoading"
             class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
           >
-            {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
+            {{ translateLoading ? 'Translating...' : 'Translate' }}
           </button>
         </div>
 

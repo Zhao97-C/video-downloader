@@ -44,13 +44,40 @@ export async function createCheckout(plan: string = 'monthly') {
   return res.data
 }
 
+export interface SubtitleSegment {
+  start: number
+  end: number
+  text: string
+}
+
+export type SubtitleSource = 'auto_subtitle' | 'manual_subtitle' | 'description' | 'none'
+
+export interface SubtitlesResponse {
+  source: SubtitleSource
+  language: string | null
+  segments: SubtitleSegment[]
+  plain_text: string
+  char_count: number
+  truncated: boolean
+  has_timestamps: boolean
+  extraction_method: string | null
+}
+
+export async function fetchSubtitles(taskId: string): Promise<SubtitlesResponse> {
+  const res = await api.post('/ai/subtitles', { task_id: taskId })
+  return res.data
+}
+
 export async function summarizeVideo(taskId: string) {
   const res = await api.post('/ai/summarize', { task_id: taskId })
   return res.data
 }
 
-export async function translateSubtitle(text: string, targetLanguage: string = 'Chinese') {
-  const res = await api.post('/ai/translate-subtitle', { text, target_language: targetLanguage })
+export async function translateSubtitle(taskId: string, targetLanguage: string = 'Chinese') {
+  const res = await api.post('/ai/translate-subtitle', {
+    task_id: taskId,
+    target_language: targetLanguage,
+  })
   return res.data
 }
 

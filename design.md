@@ -87,8 +87,9 @@ async def extract_video_info(url: str) -> dict:
 
 ### 3.4 增值功能
 
-- **视频总结**：调用 OpenAI API 对字幕/转录文本进行 AI 总结
-- **字幕翻译**：提取字幕后调用翻译 API，支持多语言
+- **字幕/转录展示**：登录用户可查看、复制带时间轴的字幕全文（引流能力，见第十章）
+- **视频总结**：调用 DeepSeek API 对字幕/转录文本进行 AI 总结（PRO）
+- **字幕翻译**：基于真实字幕调用翻译 API（PRO，见第十章）
 - **批量下载**：PRO 用户支持播放列表批量解析
 
 ## 四、技术栈明细
@@ -144,15 +145,16 @@ video-downloader/
 
 ## 六、API 设计
 
-- `POST /api/parse` - 解析视频链接，返回可用格式列表
+- `POST /api/parse` - 解析视频链接，返回格式列表及 `has_subtitles`、`subtitle_languages`
 - `GET /api/download/{task_id}` - 下载视频（重定向/代理/流式）
 - `POST /api/auth/register` - 注册
 - `POST /api/auth/login` - 登录
 - `GET /api/user/profile` - 用户信息
 - `POST /api/payment/create-checkout` - 创建 Stripe 支付会话
 - `POST /api/payment/webhook` - Stripe Webhook
-- `POST /api/ai/summarize` - 视频总结
-- `POST /api/ai/translate-subtitle` - 字幕翻译
+- `POST /api/ai/subtitles` - 获取字幕/转录文本（登录用户，带时间轴）
+- `POST /api/ai/summarize` - 视频总结（PRO，`task_id`）
+- `POST /api/ai/translate-subtitle` - 字幕翻译（PRO，`task_id` + `target_language`）
 
 ## 七、开发分步计划
 
@@ -231,3 +233,207 @@ POST /api/parse (解析视频) → task_id
 
 - AI 总结功能仅 PRO 用户可用（保持不变）
 - DeepSeek 成本极低（约为 GPT-4o-mini 的 1/10），不会对盈利能力产生实质影响
+
+---
+
+## 十、字幕/转录文本展示（已评审确认）
+
+> 评审结论（2025-05）：权限方案 A；不纳入字幕文件下载；解析响应增加字幕可用性字段；默认带时间轴展示；翻译 API 统一为 `task_id` 驱动。
+
+### 10.1 功能目标
+
+在「解析成功 → 结果卡片」流程中，让用户能够：
+
+1. **查看**视频字幕或转录文本（标明来源：自动字幕 / 人工字幕 / 描述降级）
+2. **默认带时间轴**阅读，可切换为纯文本模式
+3. **复制**全文（登录即可，用于推广引流）
+4. 为 **AI 总结 / 字幕翻译** 提供同一份后端数据源（修复前端传标题假数据的 bug）
+
+**本次不做**：字幕文件下载（`.vtt` / `.srt`）、Whisper 本地转录、多轨字幕编辑器。
+
+### 10.2 权限模型（方案 A）
+
+| 能力 | 免费用户 | 登录用户 | PRO 用户 |
+|------|----------|----------|----------|
+| 解析后查看字幕可用性徽章 | ✓ | ✓ | ✓ |
+| 查看字幕全文（带时间轴） | — | ✓ | ✓ |
+| 复制字幕 | — | ✓ | ✓ |
+| AI 总结 | — | — | ✓ |
+| 字幕翻译 | — | — | ✓ |
+
+未登录点击「查看字幕」时，引导登录/注册（与商业化产品常见做法一致：用实用功能拉新，AI 能力锁 PRO）。
+
+### 10.3 数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as VideoResult
+  participant API as FastAPI
+  participant YT as yt-dlp
+  participant Cache as task 内存缓存
+
+  U->>FE: 解析 URL
+  FE->>API: POST /api/parse
+  API-->>FE: task_id + has_subtitles + subtitle_languages
+
+  U->>FE: 点击「查看字幕」
+  FE->>API: POST /api/ai/subtitles { task_id }
+  API->>Cache: 命中则直接返回
+  alt 未缓存
+    API->>YT: skip_download + writeautosub
+    YT-->>API: .vtt/.srt
+    API->>API: 解析为 segments + plain_text
+    API->>Cache: task.subtitles
+  end
+  API-->>FE: SubtitlesResponse（默认渲染时间轴）
+
+  U->>FE: AI 总结 / 翻译（PRO）
+  FE->>API: summarize / translate-subtitle { task_id }
+  API->>Cache: 复用字幕，flatten 后送 DeepSeek
+```
+
+### 10.4 后端：提取层重构
+
+**提取优先级（已实现）**：
+
+1. **平台字幕 API**：使用 `extract_info` 返回的 `subtitles` / `automatic_captions` 中的 CDN URL，经 HTTP 直接拉取（YouTube timedtext、B站字幕链等），带平台 Referer
+2. **yt-dlp 降级**：平台 URL 不可用或无轨道时，`writesubtitles` + `writeautomaticsub` 下载 VTT/SRT
+3. **描述降级**：仍无字幕则用 `description`
+
+PRO / 白名单：`FEATURE_WHITELIST_EMAILS` 与 JWT `_apply_whitelist` 使白名单邮箱 `is_pro=true`，AI 总结/翻译走 PRO 校验；字幕查看仅需登录。
+
+将 `backend/app/services/subtitle.py` 独立服务，与 `ai.py` 拆分：
+
+```
+extract_subtitles_raw(task_info) -> SubtitleBundle
+  ├── source: auto_subtitle | manual_subtitle | description | none
+  ├── language: str | null
+  ├── segments: [{ start_sec, end_sec, text }]   # 展示用，保留时间轴
+  ├── plain_text: str                          # 保留换行，适合复制/纯文本模式
+  ├── char_count: int
+  └── truncated: bool
+
+flatten_for_ai(bundle) -> str                    # 去时间轴、拼接，供 summarize/translate（≤8000 字）
+```
+
+**语言选择**（与 §9.3 一致）：
+
+1. `subtitleslangs` 优先级：`zh-Hans`, `zh-CN`, `zh`, `en`, `ja`, `ko`, `auto`
+2. 多文件时取优先级最高且成功下载的轨道
+3. 无字幕文件 → `source=description`，`plain_text=info.description`（展示截断 20000 字，AI 仍 8000 字）
+4. 仍无内容 → `source=none`
+
+**task 级缓存**：首次提取后写入 `_tasks[task_id]["subtitles"]`，与下载 task 同生命周期（约 30 分钟）。`summarize`、`translate-subtitle`、`/subtitles` 均优先读缓存，避免重复 yt-dlp 请求。
+
+### 10.5 API 设计
+
+#### 10.5.1 解析响应扩展
+
+`POST /api/parse` 的 `ParseResponse` 增加只读字段（`extract_info` 即可，不下载字幕）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `has_subtitles` | `bool \| null` | 平台是否提供字幕/自动字幕轨道 |
+| `subtitle_languages` | `list[str] \| null` | 可用语言代码，最多返回 5 个 |
+
+前端在结果卡片显示徽章，例如：`有字幕 · 中文/英文` 或 `可能无字幕`。
+
+#### 10.5.2 获取字幕
+
+`POST /api/ai/subtitles`
+
+- **认证**：需登录（JWT）
+- **请求**：`{ "task_id": "..." }`
+- **响应**：
+
+```json
+{
+  "source": "auto_subtitle",
+  "language": "zh-Hans",
+  "segments": [{ "start": 0.0, "end": 3.2, "text": "大家好" }],
+  "plain_text": "大家好\n欢迎...",
+  "char_count": 4521,
+  "truncated": false,
+  "has_timestamps": true
+}
+```
+
+| `source` | 含义 |
+|----------|------|
+| `auto_subtitle` | 平台自动生成字幕 |
+| `manual_subtitle` | 上传/人工字幕 |
+| `description` | 无字幕，降级为视频描述 |
+| `none` | 无可用文本 |
+
+#### 10.5.3 字幕翻译（商业化对齐）
+
+`POST /api/ai/translate-subtitle` **仅保留** `task_id` 驱动（废弃前端传 `text`）：
+
+| 维度 | 改前 | 改后 |
+|------|------|------|
+| 请求体 | `{ text, target_language }` | `{ task_id, target_language }` |
+| 字幕来源 | 前端传假数据（标题） | 后端缓存/提取真实字幕 |
+| 权限 | PRO | PRO（不变） |
+
+- 后端：`get_or_extract_subtitles(task)` → `flatten_for_ai()` → DeepSeek 翻译
+- 若 `source=description`，响应/前端需标注「基于视频描述，非逐句字幕」
+- `target_language` 默认 `"Chinese"`，前端可提供下拉（英文、日文等）作为增值体验
+
+#### 10.5.4 AI 总结（与 §9 对齐）
+
+`POST /api/ai/summarize` 逻辑不变，内部改为复用 `SubtitleBundle` 缓存 + `flatten_for_ai()`。
+
+### 10.6 前端设计（`VideoResult.vue`）
+
+在 **格式选择** 与 **AI Tools** 之间新增 **「Subtitles / Transcript」** 区块：
+
+- **解析后**：根据 `has_subtitles` / `subtitle_languages` 显示徽章
+- **懒加载**：点击「查看字幕」再请求 `/api/ai/subtitles`（不阻塞 parse）
+- **默认展示**：**带时间轴**（`segments` → `formatTime(start) + text`）
+- **可切换**：「仅纯文本」模式使用 `plain_text`
+- **操作**：复制全文（登录用户）；未登录引导登录
+- **空状态**：`source=none` 友好提示；`description` 显示降级提示条
+- **样式**：延续 `bg-bg-input`、`border-border`；移动端字幕区 `max-h: 40vh`
+
+**AI 区块联动**：
+
+- `translateSubtitle(taskId, targetLanguage)` 替代原 `text` 参数
+- 翻译结果展示在 AI Tools 区域，标注「基于字幕 · 语言对」
+
+### 10.7 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `backend/app/services/subtitle.py` | 平台 API + yt-dlp 降级、`SubtitleBundle`、缓存 |
+| `backend/app/services/ai.py` | DeepSeek 总结/翻译，调用 subtitle 服务 |
+| `backend/app/services/download.py` | `parse_video` 填充 `has_subtitles` / `subtitle_languages` |
+| `backend/app/schemas/video.py` | `ParseResponse` 新字段 |
+| `backend/app/schemas/subtitle.py` | 新建：`SubtitlesResponse`、`SubtitleSegment` 等 |
+| `backend/app/api/ai.py` | 新增 `/subtitles`；改 `translate-subtitle` 请求体 |
+| `frontend/src/api/index.ts` | `fetchSubtitles`、`translateSubtitle(taskId, lang)` |
+| `frontend/src/components/VideoResult.vue` | 字幕展示区 + 修翻译调用 |
+| `README.md` | API 文档补充 |
+
+### 10.8 分步实施与验收
+
+| 步骤 | 内容 | 验收标准 |
+|------|------|----------|
+| Step 1 | 后端 raw 提取 + `/api/ai/subtitles` + 缓存 + parse 扩展字段 | 登录用户请求 YouTube 链接返回带 `segments` 的 JSON；parse 含字幕徽章字段 |
+| Step 2 | 前端字幕区（查看/复制/时间轴默认/纯文本切换） | 解析后可见字幕，可复制，默认显示时间轴 |
+| Step 3 | 修复 translate + summarize 走缓存 | 翻译为真实字幕；总结不重复提取 |
+| — | 字幕文件下载 | **不纳入本次** |
+
+### 10.9 风险与边界
+
+| 风险 | 应对 |
+|------|------|
+| 部分平台无 auto sub | `description` 降级 + UI 明确标注 |
+| 提取慢（2–15s） | 懒加载 + loading，不阻塞 parse |
+| VTT 含样式标签 | 解析时 strip HTML/VTT cue 标记 |
+| 超长字幕 | 展示截断 20000 字 + `truncated: true`；AI 输入仍 8000 字 |
+| task 过期 | 404，提示重新解析 |
+
+### 10.10 与 Phase 计划关系
+
+本功能归入 **Phase 5 增值功能** 的子项，在「视频总结 + 字幕翻译」已落地基础上补齐**展示层**与**翻译 API 修正**，不单独开 Phase。

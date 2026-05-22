@@ -24,6 +24,8 @@ class ParseResponse(BaseModel):
     platform: str | None = None
     formats: list[FormatInfo]
     task_id: str
+    has_subtitles: bool = False
+    subtitle_languages: list[str] | None = None
 
     @field_validator("duration", mode="before")
     @classmethod

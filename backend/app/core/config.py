@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_DOWNLOADS: int = 5
     TEMP_FILE_EXPIRY_MINUTES: int = 30
     FREE_DAILY_LIMIT: int = 3
+    FREE_DAILY_SUMMARIZE_LIMIT: int = 3
     FREE_MAX_RESOLUTION: int = 720
     LARGE_FILE_THRESHOLD: int = 500 * 1024 * 1024  # 500MB
 

@@ -13,7 +13,7 @@ const store = useAppStore()
         Unlock unlimited downloads
       </h2>
       <p class="text-white/65 mb-8 leading-relaxed text-sm max-w-sm">
-        4K quality, batch downloads, AI summaries, subtitle translation and zero limits.
+        4K quality, batch downloads, unlimited AI summaries, mind maps, Q&A, and subtitle translation.
         Starting at just
         <span class="text-white font-semibold">
           {{ store.siteConfig.pro_monthly_price }}{{ store.siteConfig.pro_monthly_period }}

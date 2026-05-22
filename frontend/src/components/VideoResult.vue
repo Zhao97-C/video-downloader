@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   summarizeVideoStream,
@@ -11,6 +11,7 @@ import {
 import { useAppStore } from '../stores/app'
 import MindMapViewer from './MindMapViewer.vue'
 import VideoChatPanel from './VideoChatPanel.vue'
+import VideoSummaryPanel from './VideoSummaryPanel.vue'
 
 const store = useAppStore()
 const router = useRouter()
@@ -85,7 +86,11 @@ function formatCueTime(seconds: number): string {
 
 const aiSummary = ref('')
 const aiLoading = ref(false)
+const summaryError = ref('')
+const summaryQuotaExceeded = ref(false)
+const summaryFromMetadata = ref(false)
 let summarizeAbort: AbortController | null = null
+
 const translateResult = ref('')
 const translateLoading = ref(false)
 const aiOutputLang = ref('Chinese')
@@ -99,6 +104,7 @@ const mindmapFullscreen = ref(false)
 let mindmapAbort: AbortController | null = null
 
 const isPro = computed(() => !!store.user?.isPro)
+const summarizeLimit = computed(() => store.siteConfig.free_daily_summarize_limit ?? 3)
 
 const mindmapPreviewMarkdown = computed(() => {
   const title = props.data.title.replace(/[#\n]/g, ' ').trim() || 'Video'
@@ -124,9 +130,9 @@ const showPlainText = ref(false)
 const subtitlesLoaded = ref(false)
 
 type MainTab = 'download' | 'subtitles' | 'ai'
-type AiSubTab = 'summary' | 'translate' | 'mindmap' | 'chat'
+type AiSubTab = 'translate' | 'mindmap' | 'chat'
 const activeMainTab = ref<MainTab>('download')
-const activeAiSubTab = ref<AiSubTab>('summary')
+const activeAiSubTab = ref<AiSubTab>('translate')
 
 const mainTabs: { id: MainTab; label: string }[] = [
   { id: 'download', label: 'Download' },
@@ -135,8 +141,7 @@ const mainTabs: { id: MainTab; label: string }[] = [
 ]
 
 const aiSubTabs: { id: AiSubTab; label: string; pro?: boolean }[] = [
-  { id: 'summary', label: 'Summary' },
-  { id: 'translate', label: 'Translate' },
+  { id: 'translate', label: 'Translate', pro: true },
   { id: 'mindmap', label: 'Mind Map', pro: true },
   { id: 'chat', label: 'Q&A', pro: true },
 ]
@@ -169,7 +174,14 @@ const displayLines = computed(() => {
   )
 })
 
+function requireLogin(message = '请先登录后使用此功能。'): boolean {
+  if (store.isLoggedIn) return true
+  if (confirm(message)) router.push('/auth')
+  return false
+}
+
 async function handleDownload(format: FormatInfo) {
+  if (!requireLogin()) return
   if (format.is_pro) {
     alert('This quality requires a PRO subscription. Upgrade to unlock!')
     return
@@ -178,8 +190,11 @@ async function handleDownload(format: FormatInfo) {
   downloading.value = true
 
   const url = `/api/download/${props.data.task_id}?format_id=${encodeURIComponent(format.format_id)}`
+  const token = localStorage.getItem('token')
   try {
-    const res = await fetch(url)
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || `Download failed (${res.status})`)
@@ -201,17 +216,9 @@ async function handleDownload(format: FormatInfo) {
   }
 }
 
-function promptLogin() {
-  const go = confirm('Sign in to view subtitles and copy transcript text.')
-  if (go) router.push('/auth')
-}
-
 async function handleLoadSubtitles() {
+  if (!requireLogin('登录后可查看字幕全文。')) return
   activeMainTab.value = 'subtitles'
-  if (!store.isLoggedIn) {
-    promptLogin()
-    return
-  }
   subtitlesLoading.value = true
   subtitlesError.value = ''
   try {
@@ -226,10 +233,7 @@ async function handleLoadSubtitles() {
 }
 
 async function handleCopySubtitles() {
-  if (!store.isLoggedIn) {
-    promptLogin()
-    return
-  }
+  if (!requireLogin()) return
   if (!subtitles.value) {
     await handleLoadSubtitles()
   }
@@ -241,35 +245,43 @@ async function handleCopySubtitles() {
   }
 }
 
-async function handleSummarize() {
-  activeMainTab.value = 'ai'
-  activeAiSubTab.value = 'summary'
-  if (!store.isLoggedIn || !store.user?.isPro) {
-    alert('AI Summary requires a PRO subscription.')
-    return
-  }
+async function startAutoSummary() {
+  if (!store.isLoggedIn) return
+
   summarizeAbort?.abort()
   summarizeAbort = new AbortController()
   aiLoading.value = true
   aiSummary.value = ''
+  summaryError.value = ''
+  summaryQuotaExceeded.value = false
+  summaryFromMetadata.value = false
+
   try {
     await summarizeVideoStream(
       props.data.task_id,
-      aiOutputLang.value,
       {
         onChunk: (text) => {
           aiSummary.value += text
         },
+        onDone: (meta) => {
+          summaryFromMetadata.value = !!meta?.from_metadata_only
+        },
         onError: (message) => {
-          aiSummary.value = `Error: ${message}`
+          summaryError.value = message
         },
       },
       summarizeAbort.signal,
     )
   } catch (e: unknown) {
     if (e instanceof DOMException && e.name === 'AbortError') return
-    const msg = e instanceof Error ? e.message : 'Failed to generate summary'
-    aiSummary.value = `Error: ${msg}`
+    const err = e as Error & { status?: number }
+    const msg = err instanceof Error ? err.message : '生成总结失败'
+    if (err.status === 429 || msg.toLowerCase().includes('limit')) {
+      summaryQuotaExceeded.value = true
+      summaryError.value = ''
+    } else {
+      summaryError.value = msg
+    }
   } finally {
     aiLoading.value = false
     summarizeAbort = null
@@ -279,7 +291,8 @@ async function handleSummarize() {
 async function handleTranslate() {
   activeMainTab.value = 'ai'
   activeAiSubTab.value = 'translate'
-  if (!store.isLoggedIn || !store.user?.isPro) {
+  if (!requireLogin()) return
+  if (!store.user?.isPro) {
     alert('Subtitle translation requires a PRO subscription.')
     return
   }
@@ -297,7 +310,8 @@ async function handleTranslate() {
 async function handleMindmap() {
   activeMainTab.value = 'ai'
   activeAiSubTab.value = 'mindmap'
-  if (!store.isLoggedIn || !isPro.value) return
+  if (!requireLogin()) return
+  if (!isPro.value) return
   mindmapAbort?.abort()
   mindmapAbort = new AbortController()
   mindmapLoading.value = true
@@ -331,20 +345,54 @@ async function handleMindmap() {
     mindmapAbort = null
   }
 }
+
+function resetSummaryState() {
+  summarizeAbort?.abort()
+  aiSummary.value = ''
+  summaryError.value = ''
+  summaryQuotaExceeded.value = false
+  summaryFromMetadata.value = false
+  aiLoading.value = false
+}
+
+onMounted(() => {
+  startAutoSummary()
+})
+
+watch(
+  () => props.data.task_id,
+  () => {
+    resetSummaryState()
+    startAutoSummary()
+  },
+)
+
+onUnmounted(() => {
+  summarizeAbort?.abort()
+  mindmapAbort?.abort()
+})
 </script>
 
 <template>
   <div class="rounded-2xl bg-bg-card border border-border overflow-hidden shadow-sm">
-    <!-- Video Info -->
-    <div class="flex gap-4 p-5">
-      <div v-if="data.thumbnail" class="flex-shrink-0 w-28 h-[72px] md:w-40 md:h-24 rounded-lg overflow-hidden bg-bg-secondary">
-        <img :src="`/api/proxy-image?url=${encodeURIComponent(data.thumbnail)}`" :alt="data.title" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-      </div>
-      <div class="flex-1 min-w-0">
-        <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-2 mb-2 leading-snug">
+    <div class="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-0">
+      <!-- Left: video + auto summary -->
+      <div class="p-5 md:p-6 lg:p-8 lg:border-r border-border">
+        <div
+          v-if="data.thumbnail"
+          class="aspect-video w-full rounded-xl overflow-hidden bg-bg-secondary mb-4"
+        >
+          <img
+            :src="`/api/proxy-image?url=${encodeURIComponent(data.thumbnail)}`"
+            :alt="data.title"
+            class="w-full h-full object-cover"
+            referrerpolicy="no-referrer"
+          />
+        </div>
+        <h3 class="font-semibold text-text-primary text-sm md:text-base line-clamp-3 mb-2 leading-snug">
           {{ data.title }}
         </h3>
-        <div class="flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+        <div class="flex flex-wrap items-center gap-2 text-xs text-text-secondary mb-1">
           <span v-if="data.platform" class="px-2 py-0.5 rounded-md bg-bg-input capitalize">
             {{ data.platform }}
           </span>
@@ -356,307 +404,297 @@ async function handleMindmap() {
             {{ subtitleBadge }}
           </span>
         </div>
-      </div>
-    </div>
 
-    <!-- Main tabs -->
-    <div class="border-t border-border">
-      <div
-        class="flex overflow-x-auto border-b border-border scrollbar-thin"
-        role="tablist"
-        aria-label="Video actions"
-      >
-        <button
-          v-for="tab in mainTabs"
-          :key="tab.id"
-          type="button"
-          role="tab"
-          :aria-selected="activeMainTab === tab.id"
-          :class="mainTabClass(tab.id)"
-          @click="activeMainTab = tab.id"
+        <VideoSummaryPanel
+          :loading="aiLoading"
+          :text="aiSummary"
+          :error="summaryError"
+          :quota-exceeded="summaryQuotaExceeded"
+          :from-metadata-only="summaryFromMetadata"
+          :summarize-limit="summarizeLimit"
+        />
+      </div>
+
+      <!-- Right: feature tabs -->
+      <div class="flex flex-col min-h-0 border-t lg:border-t-0 border-border">
+        <div
+          class="flex overflow-x-auto border-b border-border scrollbar-thin shrink-0"
+          role="tablist"
+          aria-label="Video actions"
         >
-          {{ tab.label }}
-          <span v-if="tab.id === 'ai'" class="pro-badge ml-1.5">PRO</span>
-        </button>
-      </div>
-
-      <div class="min-h-[280px] max-h-[min(55vh,520px)] overflow-y-auto p-5">
-        <!-- Download -->
-        <div v-show="activeMainTab === 'download'" role="tabpanel">
-          <div v-if="videoFormats.length" class="mb-5">
-            <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Video</h4>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                v-for="fmt in videoFormats"
-                :key="fmt.format_id"
-                @click="handleDownload(fmt)"
-                :disabled="downloading && selectedFormat === fmt.format_id"
-                :class="[
-                  'relative px-3 py-3 rounded-xl text-left transition-all text-sm border',
-                  fmt.is_pro
-                    ? 'border-pro/30 bg-pro-light hover:bg-yellow-100'
-                    : 'border-border bg-bg-input hover:border-border-strong card-hover'
-                ]"
-              >
-                <div class="flex items-center justify-between mb-0.5">
-                  <span class="font-semibold text-text-primary text-sm">{{ fmt.resolution }}</span>
-                  <span v-if="fmt.is_pro" class="pro-badge">PRO</span>
-                </div>
-                <div class="text-text-secondary text-xs">
-                  {{ fmt.ext.toUpperCase() }} · {{ formatFileSize(fmt.filesize) }}
-                </div>
-                <div v-if="downloading && selectedFormat === fmt.format_id" class="absolute inset-0 flex items-center justify-center bg-bg-card/80 rounded-xl">
-                  <svg class="w-4 h-4 animate-spin text-text-secondary" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                  </svg>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          <div v-if="audioFormats.length">
-            <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Audio Only</h4>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                v-for="fmt in audioFormats"
-                :key="fmt.format_id"
-                @click="handleDownload(fmt)"
-                class="px-3 py-3 rounded-xl text-left transition-all text-sm border border-border bg-bg-input hover:border-border-strong card-hover"
-              >
-                <div class="font-semibold text-text-primary text-sm mb-0.5">{{ fmt.ext.toUpperCase() }}</div>
-                <div class="text-text-secondary text-xs">{{ fmt.acodec }} · {{ formatFileSize(fmt.filesize) }}</div>
-              </button>
-            </div>
-          </div>
-
-          <p
-            v-if="!videoFormats.length && !audioFormats.length"
-            class="text-sm text-text-secondary"
+          <button
+            v-for="tab in mainTabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            :aria-selected="activeMainTab === tab.id"
+            :class="mainTabClass(tab.id)"
+            @click="activeMainTab = tab.id"
           >
-            No downloadable formats found.
-          </p>
+            {{ tab.label }}
+          </button>
         </div>
 
-        <!-- Subtitles -->
-        <div v-show="activeMainTab === 'subtitles'" role="tabpanel">
-          <div class="flex flex-wrap gap-2 mb-3">
-            <button
-              @click="handleLoadSubtitles"
-              :disabled="subtitlesLoading"
-              class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
-            >
-              {{ subtitlesLoading ? 'Loading...' : subtitlesLoaded ? 'Reload' : 'View Subtitles' }}
-            </button>
-            <button
-              v-if="subtitlesLoaded && subtitles?.plain_text"
-              @click="handleCopySubtitles"
-              class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
-            >
-              Copy
-            </button>
-            <button
-              v-if="subtitlesLoaded && subtitles?.segments?.length"
-              @click="showPlainText = !showPlainText"
-              class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-secondary transition-all"
-            >
-              {{ showPlainText ? 'Show timestamps' : 'Plain text only' }}
-            </button>
-          </div>
-
-          <div v-if="subtitlesError" class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
-            {{ subtitlesError }}
-          </div>
-
-          <div
-            v-else-if="subtitlesLoaded && subtitles"
-            class="rounded-xl border border-border bg-bg-input overflow-hidden"
-          >
-            <div class="px-4 py-2 border-b border-border flex flex-wrap gap-2 text-xs text-text-secondary">
-              <span v-if="subtitles.language" class="px-2 py-0.5 rounded-md bg-bg-card">{{ subtitles.language }}</span>
-              <span class="px-2 py-0.5 rounded-md bg-bg-card">{{ sourceLabel[subtitles.source] || subtitles.source }}</span>
-              <span v-if="subtitles.extraction_method" class="px-2 py-0.5 rounded-md bg-bg-card capitalize">
-                via {{ subtitles.extraction_method.replace('_', ' ') }}
-              </span>
-              <span v-if="subtitles.truncated" class="text-amber-600">Truncated preview</span>
-            </div>
-
-            <div
-              v-if="subtitles.source === 'none'"
-              class="p-4 text-sm text-text-secondary space-y-2"
-            >
-              <p>No timed subtitles could be extracted for this video.</p>
-              <p v-if="subtitles.hint" class="text-xs text-amber-700">{{ subtitles.hint }}</p>
-              <p v-else-if="data.platform?.toLowerCase().includes('bilibili')" class="text-xs text-amber-700">
-                Bilibili CC/AI subtitles often require <code class="text-xs">BILIBILI_SESSDATA</code> in backend .env.
-              </p>
-            </div>
-
-            <div
-              v-else
-              class="p-4 text-sm text-text-secondary leading-relaxed font-mono tabular-nums space-y-1"
-            >
-              <p v-for="(line, i) in displayLines" :key="i" class="whitespace-pre-wrap break-words">
-                {{ line }}
-              </p>
-            </div>
-          </div>
-
-          <p v-else-if="!subtitlesLoading" class="text-sm text-text-muted">
-            Click View Subtitles to load transcript for this video.
-          </p>
-        </div>
-
-        <!-- AI Tools -->
-        <div v-show="activeMainTab === 'ai'" role="tabpanel">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div
-              class="flex gap-1 overflow-x-auto"
-              role="tablist"
-              aria-label="AI features"
-            >
-              <button
-                v-for="tab in aiSubTabs"
-                :key="tab.id"
-                type="button"
-                role="tab"
-                :aria-selected="activeAiSubTab === tab.id"
-                :class="aiSubTabClass(tab.id)"
-                @click="activeAiSubTab = tab.id"
-              >
-                {{ tab.label }}
-                <span v-if="tab.pro" class="pro-badge ml-1 scale-90">PRO</span>
-              </button>
-            </div>
-            <label class="flex items-center gap-1.5 text-xs text-text-secondary shrink-0">
-              <span class="whitespace-nowrap">Output</span>
-              <select
-                v-model="aiOutputLang"
-                class="px-3 py-2 rounded-lg text-sm border border-border bg-bg-input text-text-primary"
-                title="AI output language"
-              >
-                <option value="Chinese">Chinese</option>
-                <option value="English">English</option>
-                <option value="Japanese">Japanese</option>
-                <option value="Korean">Korean</option>
-                <option value="Spanish">Spanish</option>
-              </select>
-            </label>
-          </div>
-
-          <!-- Summary -->
-          <div v-show="activeAiSubTab === 'summary'">
-            <button
-              @click="handleSummarize"
-              :disabled="aiLoading"
-              class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
-            >
-              {{ aiLoading ? 'Summarizing...' : 'AI Summary' }}
-            </button>
-            <div
-              v-if="aiSummary || aiLoading"
-              class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap"
-            >
-              <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider flex items-center gap-2">
-                Summary
-                <span v-if="aiLoading && !aiSummary" class="text-text-muted font-normal normal-case">Generating...</span>
+        <div class="min-h-[300px] max-h-[min(60vh,560px)] overflow-y-auto p-5 md:p-6 lg:p-8 flex-1">
+          <!-- Download -->
+          <div v-show="activeMainTab === 'download'" role="tabpanel">
+            <div v-if="videoFormats.length" class="mb-5">
+              <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Video</h4>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <button
+                  v-for="fmt in videoFormats"
+                  :key="fmt.format_id"
+                  @click="handleDownload(fmt)"
+                  :disabled="downloading && selectedFormat === fmt.format_id"
+                  :class="[
+                    'relative px-3 py-3 rounded-xl text-left transition-all text-sm border',
+                    fmt.is_pro
+                      ? 'border-pro/30 bg-pro-light hover:bg-yellow-100'
+                      : 'border-border bg-bg-input hover:border-border-strong card-hover'
+                  ]"
+                >
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="font-semibold text-text-primary text-sm">{{ fmt.resolution }}</span>
+                    <span v-if="fmt.is_pro" class="pro-badge">PRO</span>
+                  </div>
+                  <div class="text-text-secondary text-xs">
+                    {{ fmt.ext.toUpperCase() }} · {{ formatFileSize(fmt.filesize) }}
+                  </div>
+                  <div v-if="downloading && selectedFormat === fmt.format_id" class="absolute inset-0 flex items-center justify-center bg-bg-card/80 rounded-xl">
+                    <svg class="w-4 h-4 animate-spin text-text-secondary" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                  </div>
+                </button>
               </div>
-              {{ aiSummary }}<span v-if="aiLoading" class="inline-block w-0.5 h-4 ml-0.5 bg-text-secondary animate-pulse align-middle" />
             </div>
-            <p v-else class="mt-4 text-sm text-text-muted">Click AI Summary to generate from subtitles.</p>
+
+            <div v-if="audioFormats.length">
+              <h4 class="text-xs font-medium text-text-secondary uppercase tracking-wider mb-3">Audio Only</h4>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <button
+                  v-for="fmt in audioFormats"
+                  :key="fmt.format_id"
+                  @click="handleDownload(fmt)"
+                  class="px-3 py-3 rounded-xl text-left transition-all text-sm border border-border bg-bg-input hover:border-border-strong card-hover"
+                >
+                  <div class="font-semibold text-text-primary text-sm mb-0.5">{{ fmt.ext.toUpperCase() }}</div>
+                  <div class="text-text-secondary text-xs">{{ fmt.acodec }} · {{ formatFileSize(fmt.filesize) }}</div>
+                </button>
+              </div>
+            </div>
+
+            <p
+              v-if="!videoFormats.length && !audioFormats.length"
+              class="text-sm text-text-secondary"
+            >
+              No downloadable formats found.
+            </p>
           </div>
 
-          <!-- Translate -->
-          <div v-show="activeAiSubTab === 'translate'">
-            <button
-              @click="handleTranslate"
-              :disabled="translateLoading"
-              class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
-            >
-              {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
-            </button>
-            <div
-              v-if="translateResult"
-              class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap"
-            >
-              <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Translation</div>
-              {{ translateResult }}
-            </div>
-            <p v-else class="mt-4 text-sm text-text-muted">Click Translate Subtitles to convert transcript to your output language.</p>
-          </div>
-
-          <!-- Mind Map -->
-          <div v-show="activeAiSubTab === 'mindmap'">
-            <div class="flex flex-wrap items-center gap-2 mb-3">
+          <!-- Subtitles -->
+          <div v-show="activeMainTab === 'subtitles'" role="tabpanel">
+            <div class="flex flex-wrap gap-2 mb-3">
               <button
-                @click="handleMindmap"
-                :disabled="mindmapLoading"
+                @click="handleLoadSubtitles"
+                :disabled="subtitlesLoading"
                 class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
               >
-                {{ mindmapLoading ? 'Building map...' : mindmapLoaded ? 'Refresh Mind Map' : 'Mind Map' }}
+                {{ subtitlesLoading ? 'Loading...' : subtitlesLoaded ? 'Reload' : 'View Subtitles' }}
               </button>
               <button
-                v-if="isPro && mindmapLoaded && mindmapMarkdown"
-                type="button"
-                class="px-3 py-1.5 rounded-lg text-xs border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
-                @click="mindmapFullscreen = true"
+                v-if="subtitlesLoaded && subtitles?.plain_text"
+                @click="handleCopySubtitles"
+                class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
               >
-                Fullscreen
+                Copy
+              </button>
+              <button
+                v-if="subtitlesLoaded && subtitles?.segments?.length"
+                @click="showPlainText = !showPlainText"
+                class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-secondary transition-all"
+              >
+                {{ showPlainText ? 'Show timestamps' : 'Plain text only' }}
               </button>
             </div>
 
-            <div v-if="mindmapError" class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
-              {{ mindmapError }}
+            <div v-if="subtitlesError" class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
+              {{ subtitlesError }}
             </div>
 
             <div
-              v-if="mindmapFromMetadata && mindmapLoaded"
-              class="mb-3 px-3 py-2 rounded-lg text-xs text-amber-700 bg-amber-50 border border-amber-200"
+              v-else-if="subtitlesLoaded && subtitles"
+              class="rounded-xl border border-border bg-bg-input overflow-hidden"
             >
-              Based on limited metadata (no timed subtitles).
+              <div class="px-4 py-2 border-b border-border flex flex-wrap gap-2 text-xs text-text-secondary">
+                <span v-if="subtitles.language" class="px-2 py-0.5 rounded-md bg-bg-card">{{ subtitles.language }}</span>
+                <span class="px-2 py-0.5 rounded-md bg-bg-card">{{ sourceLabel[subtitles.source] || subtitles.source }}</span>
+                <span v-if="subtitles.extraction_method" class="px-2 py-0.5 rounded-md bg-bg-card capitalize">
+                  via {{ subtitles.extraction_method.replace('_', ' ') }}
+                </span>
+                <span v-if="subtitles.truncated" class="text-amber-600">Truncated preview</span>
+              </div>
+
+              <div
+                v-if="subtitles.source === 'none'"
+                class="p-4 text-sm text-text-secondary space-y-2"
+              >
+                <p>No timed subtitles could be extracted for this video.</p>
+                <p v-if="subtitles.hint" class="text-xs text-amber-700">{{ subtitles.hint }}</p>
+                <p v-else-if="data.platform?.toLowerCase().includes('bilibili')" class="text-xs text-amber-700">
+                  Bilibili CC/AI subtitles often require <code class="text-xs">BILIBILI_SESSDATA</code> in backend .env.
+                </p>
+              </div>
+
+              <div
+                v-else
+                class="p-4 text-sm text-text-secondary leading-relaxed font-mono tabular-nums space-y-1"
+              >
+                <p v-for="(line, i) in displayLines" :key="i" class="whitespace-pre-wrap break-words">
+                  {{ line }}
+                </p>
+              </div>
             </div>
 
-            <div class="relative rounded-xl border border-border overflow-hidden h-[min(50vh,400px)]">
-              <div :class="{ 'blur-[6px] select-none pointer-events-none': !isPro }" class="h-full">
-                <MindMapViewer
-                  :markdown="isPro && mindmapMarkdown && !mindmapLoading ? mindmapMarkdown : mindmapPreviewMarkdown"
-                  :loading="isPro && mindmapLoading"
-                  :interactive="isPro && !!mindmapMarkdown && !mindmapLoading"
-                  class="h-full"
-                />
-              </div>
-              <div
-                v-if="!isPro"
-                class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg-card/55 backdrop-blur-[2px] px-6 text-center"
-              >
-                <p class="text-sm text-text-primary font-medium">Visualize video structure as a mind map</p>
-                <p class="text-xs text-text-secondary max-w-sm">Upgrade to PRO to generate interactive maps from subtitles.</p>
-                <router-link
-                  to="/pricing"
-                  class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-sm hover:opacity-95 transition-opacity"
-                >
-                  Upgrade to PRO
-                </router-link>
-              </div>
-              <div
-                v-else-if="isPro && !mindmapLoaded && !mindmapLoading"
-                class="absolute inset-0 flex items-center justify-center bg-bg-card/40 pointer-events-none"
-              >
-                <p class="text-xs text-text-secondary px-4 text-center">Click Mind Map to generate from subtitles</p>
-              </div>
-            </div>
+            <p v-else-if="!subtitlesLoading" class="text-sm text-text-muted">
+              Click View Subtitles to load transcript for this video.
+            </p>
           </div>
 
-          <!-- Q&A -->
-          <div v-show="activeAiSubTab === 'chat'">
-            <VideoChatPanel
-              embedded
-              :task-id="data.task_id"
-              :title="data.title"
-              :output-language="aiOutputLang"
-              :is-pro="isPro"
-              :is-logged-in="store.isLoggedIn"
-            />
+          <!-- AI Tools -->
+          <div v-show="activeMainTab === 'ai'" role="tabpanel">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div
+                class="flex gap-1 overflow-x-auto"
+                role="tablist"
+                aria-label="AI features"
+              >
+                <button
+                  v-for="tab in aiSubTabs"
+                  :key="tab.id"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeAiSubTab === tab.id"
+                  :class="aiSubTabClass(tab.id)"
+                  @click="activeAiSubTab = tab.id"
+                >
+                  {{ tab.label }}
+                  <span v-if="tab.pro" class="pro-badge ml-1 scale-90">PRO</span>
+                </button>
+              </div>
+              <label class="flex items-center gap-1.5 text-xs text-text-secondary shrink-0">
+                <span class="whitespace-nowrap">Output</span>
+                <select
+                  v-model="aiOutputLang"
+                  class="px-3 py-2 rounded-lg text-sm border border-border bg-bg-input text-text-primary"
+                  title="AI output language"
+                >
+                  <option value="Chinese">Chinese</option>
+                  <option value="English">English</option>
+                  <option value="Japanese">Japanese</option>
+                  <option value="Korean">Korean</option>
+                  <option value="Spanish">Spanish</option>
+                </select>
+              </label>
+            </div>
+
+            <p class="text-xs text-text-muted mb-4">
+              AI 总结已在左侧自动生成（简体中文）。以下为 PRO 增值功能。
+            </p>
+
+            <!-- Translate -->
+            <div v-show="activeAiSubTab === 'translate'">
+              <button
+                @click="handleTranslate"
+                :disabled="translateLoading"
+                class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
+              >
+                {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
+              </button>
+              <div
+                v-if="translateResult"
+                class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap"
+              >
+                <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Translation</div>
+                {{ translateResult }}
+              </div>
+              <p v-else class="mt-4 text-sm text-text-muted">Click Translate Subtitles to convert transcript to your output language.</p>
+            </div>
+
+            <!-- Mind Map -->
+            <div v-show="activeAiSubTab === 'mindmap'">
+              <div class="flex flex-wrap items-center gap-2 mb-3">
+                <button
+                  @click="handleMindmap"
+                  :disabled="mindmapLoading"
+                  class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
+                >
+                  {{ mindmapLoading ? 'Building map...' : mindmapLoaded ? 'Refresh Mind Map' : 'Mind Map' }}
+                </button>
+                <button
+                  v-if="isPro && mindmapLoaded && mindmapMarkdown"
+                  type="button"
+                  class="px-3 py-1.5 rounded-lg text-xs border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
+                  @click="mindmapFullscreen = true"
+                >
+                  Fullscreen
+                </button>
+              </div>
+
+              <div v-if="mindmapError" class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
+                {{ mindmapError }}
+              </div>
+
+              <div
+                v-if="mindmapFromMetadata && mindmapLoaded"
+                class="mb-3 px-3 py-2 rounded-lg text-xs text-amber-700 bg-amber-50 border border-amber-200"
+              >
+                Based on limited metadata (no timed subtitles).
+              </div>
+
+              <div class="relative rounded-xl border border-border overflow-hidden h-[min(50vh,400px)]">
+                <div :class="{ 'blur-[6px] select-none pointer-events-none': !isPro }" class="h-full">
+                  <MindMapViewer
+                    :markdown="isPro && mindmapMarkdown && !mindmapLoading ? mindmapMarkdown : mindmapPreviewMarkdown"
+                    :loading="isPro && mindmapLoading"
+                    :interactive="isPro && !!mindmapMarkdown && !mindmapLoading"
+                    class="h-full"
+                  />
+                </div>
+                <div
+                  v-if="!isPro"
+                  class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg-card/55 backdrop-blur-[2px] px-6 text-center"
+                >
+                  <p class="text-sm text-text-primary font-medium">Visualize video structure as a mind map</p>
+                  <p class="text-xs text-text-secondary max-w-sm">Upgrade to PRO to generate interactive maps from subtitles.</p>
+                  <router-link
+                    to="/pricing"
+                    class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-sm hover:opacity-95 transition-opacity"
+                  >
+                    Upgrade to PRO
+                  </router-link>
+                </div>
+                <div
+                  v-else-if="isPro && !mindmapLoaded && !mindmapLoading"
+                  class="absolute inset-0 flex items-center justify-center bg-bg-card/40 pointer-events-none"
+                >
+                  <p class="text-xs text-text-secondary px-4 text-center">Click Mind Map to generate from subtitles</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Q&A -->
+            <div v-show="activeAiSubTab === 'chat'">
+              <VideoChatPanel
+                embedded
+                :task-id="data.task_id"
+                :title="data.title"
+                :output-language="aiOutputLang"
+                :is-pro="isPro"
+                :is-logged-in="store.isLoggedIn"
+              />
+            </div>
           </div>
         </div>
       </div>

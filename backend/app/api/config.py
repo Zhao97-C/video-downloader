@@ -10,6 +10,7 @@ async def get_public_config():
     return {
         "site_name": settings.SITE_NAME,
         "free_daily_limit": settings.FREE_DAILY_LIMIT,
+        "free_daily_summarize_limit": settings.FREE_DAILY_SUMMARIZE_LIMIT,
         "free_max_resolution": settings.FREE_MAX_RESOLUTION,
         "pro_monthly_price": settings.PRO_MONTHLY_PRICE_DISPLAY,
         "pro_monthly_period": "/month",

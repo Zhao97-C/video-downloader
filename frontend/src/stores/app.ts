@@ -5,6 +5,7 @@ import { getProfile, getSiteConfig, type SiteConfig } from '../api'
 const DEFAULT_CONFIG: SiteConfig = {
   site_name: 'SaveAny',
   free_daily_limit: 3,
+  free_daily_summarize_limit: 3,
   free_max_resolution: 720,
   pro_monthly_price: '$9.9',
   pro_monthly_period: '/month',

@@ -1,6 +1,6 @@
 import os
 import asyncio
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from yt_dlp import YoutubeDL
 
@@ -10,12 +10,14 @@ from urllib.parse import unquote
 from app.schemas.video import ParseRequest, ParseResponse
 from app.services.download import parse_video, download_video, get_task, _resolve_ffmpeg_location
 from app.core.config import settings
+from app.core.security import get_current_user
 
 router = APIRouter()
 
 
 @router.post("/parse", response_model=ParseResponse)
-async def parse_url(req: ParseRequest):
+async def parse_url(req: ParseRequest, current_user: dict = Depends(get_current_user)):
+    del current_user
     try:
         result = await parse_video(req.url, req.mode)
         return result
@@ -24,7 +26,12 @@ async def parse_url(req: ParseRequest):
 
 
 @router.get("/download/{task_id}")
-async def download(task_id: str, format_id: str = Query(...)):
+async def download(
+    task_id: str,
+    format_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    del current_user
     try:
         result = await download_video(task_id, format_id)
     except ValueError as e:

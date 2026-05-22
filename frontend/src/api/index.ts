@@ -71,7 +71,7 @@ export async function fetchSubtitles(taskId: string): Promise<SubtitlesResponse>
 
 export interface SummarizeStreamCallbacks {
   onChunk: (text: string) => void
-  onDone?: () => void
+  onDone?: (meta?: { from_metadata_only?: boolean; cached?: boolean }) => void
   onError?: (message: string) => void
 }
 
@@ -91,9 +91,9 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
   return { event, data: dataLines.join('\n') }
 }
 
+/** AI summary is always generated in Simplified Chinese (server-enforced). */
 export async function summarizeVideoStream(
   taskId: string,
-  outputLanguage: string,
   callbacks: SummarizeStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -106,20 +106,22 @@ export async function summarizeVideoStream(
     },
     body: JSON.stringify({
       task_id: taskId,
-      output_language: outputLanguage,
+      output_language: 'Chinese',
     }),
     signal,
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    const detail = err.detail
+    const errBody = await res.json().catch(() => ({}))
+    const detail = errBody.detail
     const message = typeof detail === 'string'
       ? detail
       : Array.isArray(detail)
         ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
         : `Failed (${res.status})`
-    throw new Error(message || `Failed (${res.status})`)
+    const error = new Error(message || `Failed (${res.status})`) as Error & { status?: number }
+    error.status = res.status
+    throw error
   }
 
   const contentType = res.headers.get('content-type') || ''
@@ -146,13 +148,24 @@ export async function summarizeVideoStream(
       const parsed = parseSseBlock(block)
       if (!parsed) continue
       try {
-        const payload = JSON.parse(parsed.data) as { content?: string; done?: boolean; detail?: string }
+        const payload = JSON.parse(parsed.data) as {
+          content?: string
+          done?: boolean
+          detail?: string
+          from_metadata_only?: boolean
+          cached?: boolean
+        }
         if (parsed.event === 'error') {
           callbacks.onError?.(payload.detail || 'Stream error')
           return false
         }
         if (payload.content) callbacks.onChunk(payload.content)
-        if (payload.done) callbacks.onDone?.()
+        if (payload.done) {
+          callbacks.onDone?.({
+            from_metadata_only: payload.from_metadata_only,
+            cached: payload.cached,
+          })
+        }
       } catch {
         // ignore malformed SSE frames
       }
@@ -405,6 +418,7 @@ export async function mindmapStream(
 export interface SiteConfig {
   site_name: string
   free_daily_limit: number
+  free_daily_summarize_limit: number
   free_max_resolution: number
   pro_monthly_price: string
   pro_monthly_period: string

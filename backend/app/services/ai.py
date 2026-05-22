@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from openai import AsyncOpenAI
 
 from app.core.config import settings
@@ -20,16 +22,13 @@ def _normalize_output_language(language: str) -> str:
     return language
 
 
-async def summarize_video(
+def _summarize_messages(
     title: str,
     subtitles: str,
     *,
     output_language: str = "Chinese",
     from_metadata_only: bool = False,
-) -> str:
-    if not client:
-        raise RuntimeError("DeepSeek API key not configured")
-
+) -> list[dict[str, str]]:
     lang = _normalize_output_language(output_language)
     meta_hint = ""
     if from_metadata_only:
@@ -37,33 +36,54 @@ async def summarize_video(
             " Timed subtitles are not available; summarize from the title/description/metadata only. "
             "State that the summary is based on limited metadata if appropriate."
         )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant that summarizes video content. "
+                "Provide a concise, well-structured summary with key points. "
+                "Use bullet points for clarity. "
+                f"You MUST write the entire summary in {lang} only. "
+                "Do not respond in any other language."
+                + meta_hint
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Video title: {title}\n\n"
+                f"Subtitles/Transcript/Metadata:\n{subtitles}\n\n"
+                f"Please provide a summary of this video in {lang}."
+            ),
+        },
+    ]
 
-    response = await client.chat.completions.create(
+
+async def summarize_video_stream(
+    title: str,
+    subtitles: str,
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> AsyncIterator[str]:
+    if not client:
+        raise RuntimeError("DeepSeek API key not configured")
+
+    stream = await client.chat.completions.create(
         model="deepseek-chat",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful assistant that summarizes video content. "
-                    "Provide a concise, well-structured summary with key points. "
-                    "Use bullet points for clarity. "
-                    f"You MUST write the entire summary in {lang} only. "
-                    "Do not respond in any other language."
-                    + meta_hint
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Video title: {title}\n\n"
-                    f"Subtitles/Transcript/Metadata:\n{subtitles}\n\n"
-                    f"Please provide a summary of this video in {lang}."
-                ),
-            },
-        ],
+        messages=_summarize_messages(
+            title,
+            subtitles,
+            output_language=output_language,
+            from_metadata_only=from_metadata_only,
+        ),
         max_tokens=1000,
+        stream=True,
     )
-    return response.choices[0].message.content
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
 
 
 async def translate_subtitle(text: str, target_language: str, *, from_description: bool = False) -> str:

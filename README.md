@@ -64,7 +64,7 @@ docker-compose up -d
 | POST | /api/payment/create-checkout | Create Stripe checkout |
 | POST | /api/payment/webhook | Stripe webhook |
 | POST | /api/ai/subtitles | Fetch subtitles/transcript (login) |
-| POST | /api/ai/summarize | AI video summary (PRO) |
+| POST | /api/ai/summarize | AI video summary via SSE stream (PRO) |
 | POST | /api/ai/translate-subtitle | Subtitle translation (PRO, `task_id`) |
 
 ## License

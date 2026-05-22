@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  summarizeVideo,
+  summarizeVideoStream,
   translateSubtitle,
   fetchSubtitles,
   type SubtitlesResponse,
@@ -82,6 +82,7 @@ function formatCueTime(seconds: number): string {
 
 const aiSummary = ref('')
 const aiLoading = ref(false)
+let summarizeAbort: AbortController | null = null
 const translateResult = ref('')
 const translateLoading = ref(false)
 const aiOutputLang = ref('Chinese')
@@ -178,14 +179,31 @@ async function handleSummarize() {
     alert('AI Summary requires a PRO subscription.')
     return
   }
+  summarizeAbort?.abort()
+  summarizeAbort = new AbortController()
   aiLoading.value = true
+  aiSummary.value = ''
   try {
-    const res = await summarizeVideo(props.data.task_id, aiOutputLang.value)
-    aiSummary.value = res.result
-  } catch (e: any) {
-    aiSummary.value = `Error: ${e.response?.data?.detail || 'Failed to generate summary'}`
+    await summarizeVideoStream(
+      props.data.task_id,
+      aiOutputLang.value,
+      {
+        onChunk: (text) => {
+          aiSummary.value += text
+        },
+        onError: (message) => {
+          aiSummary.value = `Error: ${message}`
+        },
+      },
+      summarizeAbort.signal,
+    )
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    const msg = e instanceof Error ? e.message : 'Failed to generate summary'
+    aiSummary.value = `Error: ${msg}`
   } finally {
     aiLoading.value = false
+    summarizeAbort = null
   }
 }
 
@@ -387,9 +405,12 @@ async function handleTranslate() {
           </label>
         </div>
 
-        <div v-if="aiSummary" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
-          <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Summary</div>
-          {{ aiSummary }}
+        <div v-if="aiSummary || aiLoading" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">
+          <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider flex items-center gap-2">
+            Summary
+            <span v-if="aiLoading && !aiSummary" class="text-text-muted font-normal normal-case">Generating...</span>
+          </div>
+          {{ aiSummary }}<span v-if="aiLoading" class="inline-block w-0.5 h-4 ml-0.5 bg-text-secondary animate-pulse align-middle" />
         </div>
 
         <div v-if="translateResult" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">

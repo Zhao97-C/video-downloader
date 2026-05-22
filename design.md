@@ -388,20 +388,30 @@ flatten_for_ai(bundle) -> str                    # 去时间轴、拼接，供 s
 
 ### 10.6 前端设计（`VideoResult.vue`）
 
-在 **格式选择** 与 **AI Tools** 之间新增 **「Subtitles / Transcript」** 区块：
+解析结果卡片采用 **横向 Tab**，避免每用一功能就在下方纵向堆叠：
 
-- **解析后**：根据 `has_subtitles` / `subtitle_languages` 显示徽章
+| 层级 | Tab | 内容 |
+|------|-----|------|
+| 主 | **Download**（默认） | 视频/音频格式网格 |
+| 主 | **Subtitles** | 查看/复制/时间轴切换 |
+| 主 | **AI Tools** | 输出语言 + 子 Tab（见 §11.6、§12.5） |
+
+- 内容区统一 `min-h-[280px]`、`max-h-[min(55vh,520px)]` 内滚动；主/子 Tab 小屏横向滚动
+- 点击功能按钮时自动切换到对应 Tab（如 View Subtitles → Subtitles；AI Summary → AI / Summary）
+
+**Subtitles 面板**：
+
+- **解析后**：顶部徽章仍根据 `has_subtitles` / `subtitle_languages`
 - **懒加载**：点击「查看字幕」再请求 `/api/ai/subtitles`（不阻塞 parse）
 - **默认展示**：**带时间轴**（`segments` → `formatTime(start) + text`）
 - **可切换**：「仅纯文本」模式使用 `plain_text`
 - **操作**：复制全文（登录用户）；未登录引导登录
 - **空状态**：`source=none` 友好提示；`description` 显示降级提示条
-- **样式**：延续 `bg-bg-input`、`border-border`；移动端字幕区 `max-h: 40vh`
 
 **AI 区块联动**：
 
 - `translateSubtitle(taskId, targetLanguage)` 替代原 `text` 参数
-- 翻译结果展示在 AI Tools 区域，标注「基于字幕 · 语言对」
+- 各 AI 子功能仅在对应子 Tab 面板内展示结果（Summary / Translate / Mind Map / Q&A）
 
 ### 10.7 改动文件清单
 
@@ -541,7 +551,8 @@ task["mindmap_cache"] = {
 | 全屏 | 按钮打开 `fixed inset-0 z-50` 遮罩，内嵌同一组件 |
 | 非 PRO | `previewMarkdown`（含 `data.title`）+ `blur-sm` + 遮罩「Upgrade to PRO」→ `/pricing` |
 | 语言 | 共用 `aiOutputLang`；切换语言后再次点击会 miss 缓存并重新生成 |
-| 入口 | AI Tools 区按钮「Mind Map / 思维导图」 |
+| 入口 | AI Tools 主 Tab → **Mind Map** 子 Tab；按钮「Mind Map / 思维导图」 |
+| 布局 | 导图容器 `h-[min(50vh,400px)]`，与 Tab 内容区滚动分离 |
 
 ### 11.7 改动文件清单
 
@@ -637,7 +648,8 @@ task["chat_history"] = [{"role": "user"|"assistant", "content": "..."}]
 
 | 项 | 方案 |
 |----|------|
-| 组件 | `VideoChatPanel.vue`（折叠面板、消息列表、输入、chips） |
+| 组件 | `VideoChatPanel.vue`（`embedded` 嵌入 AI/Q&A 子 Tab；独立使用时仍可折叠） |
+| 布局 | AI Tools 主 Tab → **Q&A** 子 Tab；不依赖先执行 Summary 或 View Subtitles |
 | 语言 | 共用 `aiOutputLang` |
 | 非 PRO | 静态示例对话 + `blur` + `/pricing` CTA，不调 API |
 | 未登录 | 引导 `/auth` |

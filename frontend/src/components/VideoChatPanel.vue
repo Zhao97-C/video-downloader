@@ -8,13 +8,17 @@ export interface ChatMessage {
   content: string
 }
 
-const props = defineProps<{
-  taskId: string
-  title: string
-  outputLanguage: string
-  isPro: boolean
-  isLoggedIn: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    taskId: string
+    title: string
+    outputLanguage: string
+    isPro: boolean
+    isLoggedIn: boolean
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
 
 const router = useRouter()
 const expanded = ref(false)
@@ -144,8 +148,9 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="mt-5 rounded-xl border border-border overflow-hidden">
+  <div :class="embedded ? '' : 'mt-5 rounded-xl border border-border overflow-hidden'">
     <button
+      v-if="!embedded"
       type="button"
       class="w-full flex items-center justify-between gap-2 px-4 py-3 bg-bg-input hover:bg-bg-secondary/80 transition-colors text-left"
       @click="toggleExpanded"
@@ -161,7 +166,16 @@ function onKeydown(e: KeyboardEvent) {
       </span>
     </button>
 
-    <div v-show="expanded" class="border-t border-border p-4">
+    <div
+      v-show="embedded || expanded"
+      :class="embedded ? '' : 'border-t border-border p-4'"
+    >
+      <p
+        v-if="embedded && isPro && questionsUsed > 0"
+        class="mb-3 text-xs text-text-muted"
+      >
+        {{ questionsUsed }}/{{ maxQuestions }} questions used
+      </p>
       <div
         v-if="fromMetadata && isPro && messages.length"
         class="mb-3 px-3 py-2 rounded-lg text-xs text-amber-700 bg-amber-50 border border-amber-200"

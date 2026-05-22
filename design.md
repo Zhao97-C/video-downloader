@@ -437,3 +437,130 @@ flatten_for_ai(bundle) -> str                    # 去时间轴、拼接，供 s
 ### 10.10 与 Phase 计划关系
 
 本功能归入 **Phase 5 增值功能** 的子项，在「视频总结 + 字幕翻译」已落地基础上补齐**展示层**与**翻译 API 修正**，不单独开 Phase。
+
+---
+
+## 十一、Markmap 思维导图可视化（已评审确认）
+
+> 评审结论（2026-05）：API 采用 **SSE 流式**；同一 `task_id` + `output_language` **命中 task 内 markdown 缓存则直接返回**（不重复调 DeepSeek）；支持 **全屏查看**；非 PRO 展示 **模糊预览 + 升级 CTA**；输出语言与 AI Tools 的 **Output 下拉共用**。
+
+### 11.1 功能目标
+
+在 `VideoResult.vue` 的 **AI Tools（PRO）** 区域新增 **思维导图**：
+
+1. 后端从字幕/转录（`SubtitleBundle` 缓存）生成 **层级 Markdown 大纲**（DeepSeek）
+2. 前端用 **markmap-lib + markmap-view** 渲染可缩放、可拖拽 SVG 导图
+3. **PRO** 用户可生成、缓存复用、全屏查看；**非 PRO** 见模糊预览并引导 `/pricing`
+
+**不做**：导图导出 PNG/SVG、节点编辑器、基于翻译结果的二次导图。
+
+### 11.2 权限模型
+
+| 能力 | 免费 | 登录非 PRO | PRO |
+|------|------|------------|-----|
+| 模糊预览 + 升级 CTA | ✓ | ✓ | —（见完整导图） |
+| 生成 / 流式更新 / 全屏 | — | — | ✓ |
+
+- 后端：`POST /api/ai/mindmap` 需登录 + `is_pro`（403）
+- 前端：非 PRO 不调 API，用基于视频标题的 **本地示例 Markdown** + `blur` + 遮罩 CTA
+
+### 11.3 数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as VideoResult
+  participant API as POST /api/ai/mindmap
+  participant Cache as task mindmap_cache
+  participant DS as DeepSeek
+  participant MM as markmap-view
+
+  alt 非 PRO
+    FE->>MM: 标题生成示例 Markdown（模糊）
+    FE->>U: 升级 CTA → /pricing
+  else PRO 且缓存命中
+    U->>FE: 思维导图
+    FE->>API: SSE { task_id, output_language }
+    API->>Cache: 同语言 markdown 存在
+    API-->>FE: SSE 单帧 markdown + done(cached)
+    FE->>MM: 渲染
+  else PRO 首次生成
+    FE->>API: SSE
+    API->>API: get_or_extract_subtitles
+    API->>DS: 流式 Markdown
+    DS-->>API: chunks
+    API-->>FE: SSE content chunks
+    API->>Cache: 写入 mindmap_cache
+    API-->>FE: done
+    FE->>MM: 累积后渲染 / 流结束再 fit
+  end
+```
+
+### 11.4 API 设计
+
+`POST /api/ai/mindmap`（PRO，SSE）
+
+**请求**：`{ "task_id": "...", "output_language": "Chinese" }`（与 summarize 字段一致）
+
+**SSE 事件**（与 `/summarize` 同格式）：
+
+| 帧 | 含义 |
+|----|------|
+| `data: {"content":"..."}` | Markdown 片段（缓存命中时可为整段） |
+| `data: {"done":true,"from_metadata_only":false,"cached":true?}` | 结束；可选 `cached` 表示来自 task 缓存 |
+| `event: error` | 错误详情 |
+
+**task 级缓存**（与字幕同生命周期 ~30min）：
+
+```python
+task["mindmap_cache"] = {
+  "output_language": "Chinese",
+  "markdown": "# ...",
+  "from_metadata_only": false,
+}
+```
+
+- 仅当 `output_language` 与请求一致时命中；语言变更则重新生成并覆盖缓存
+- 流式生成结束后 strip ` ```markdown ` 围栏再写入缓存
+
+### 11.5 AI Prompt 要点
+
+- 只输出 Markdown：`#` / `##` / `###` 与 `-` 列表
+- 深度 ≤4，节点约 15–40
+- 语言：`output_language` → `_normalize_output_language`
+- 无字幕：与总结相同，允许 metadata 降级，`from_metadata_only: true`
+
+### 11.6 前端设计
+
+| 项 | 方案 |
+|----|------|
+| 依赖 | `markmap-lib`、`markmap-view`、`d3`；`import()` 动态加载 |
+| 组件 | `MindMapViewer.vue`：SVG 渲染、`fit()`、销毁实例 |
+| 全屏 | 按钮打开 `fixed inset-0 z-50` 遮罩，内嵌同一组件 |
+| 非 PRO | `previewMarkdown`（含 `data.title`）+ `blur-sm` + 遮罩「Upgrade to PRO」→ `/pricing` |
+| 语言 | 共用 `aiOutputLang`；切换语言后再次点击会 miss 缓存并重新生成 |
+| 入口 | AI Tools 区按钮「Mind Map / 思维导图」 |
+
+### 11.7 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `design.md` | 本章 §11 |
+| `backend/app/services/ai.py` | `mindmap_markdown_stream`、围栏清理 |
+| `backend/app/api/ai.py` | `/mindmap` SSE、缓存读写 |
+| `frontend/package.json` | markmap 依赖 |
+| `frontend/src/api/index.ts` | `mindmapStream()` |
+| `frontend/src/components/MindMapViewer.vue` | 新建 |
+| `frontend/src/components/VideoResult.vue` | 导图区、全屏、预览 |
+| `frontend/src/components/FeatureCards.vue` | 文案 |
+| `frontend/src/views/Pricing.vue` | PRO 权益列表 |
+| `README.md` | API 表 |
+
+### 11.8 验收标准
+
+| 步骤 | 标准 |
+|------|------|
+| 后端 | PRO SSE 可生成；同 task+语言二次请求 `cached: true`；非 PRO 403 |
+| 前端 PRO | 流式累积后可交互缩放；全屏可用；换语言重新生成 |
+| 前端非 PRO | 模糊预览 + 跳转 Pricing，无 API 调用 |
+| 边界 | 无字幕/metadata 降级有提示；task 过期 404 |

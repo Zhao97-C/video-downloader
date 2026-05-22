@@ -9,6 +9,7 @@ A cross-platform video download web application powered by yt-dlp.
 - Smart download mode (direct link / proxy / streaming)
 - Subtitle / transcript viewer with timestamps (login)
 - AI video summaries (PRO)
+- Mind map visualization with Markmap (PRO)
 - Subtitle translation (PRO)
 - Batch playlist downloads (PRO)
 - Mobile-friendly responsive design
@@ -65,6 +66,7 @@ docker-compose up -d
 | POST | /api/payment/webhook | Stripe webhook |
 | POST | /api/ai/subtitles | Fetch subtitles/transcript (login) |
 | POST | /api/ai/summarize | AI video summary via SSE stream (PRO) |
+| POST | /api/ai/mindmap | AI mind map markdown via SSE stream (PRO, cached per task+language) |
 | POST | /api/ai/translate-subtitle | Subtitle translation (PRO, `task_id`) |
 
 ## License

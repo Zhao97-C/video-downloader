@@ -86,6 +86,80 @@ async def summarize_video_stream(
             yield delta
 
 
+def _strip_markdown_fences(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.split("\n")
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _mindmap_messages(
+    title: str,
+    subtitles: str,
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> list[dict[str, str]]:
+    lang = _normalize_output_language(output_language)
+    meta_hint = ""
+    if from_metadata_only:
+        meta_hint = (
+            " Timed subtitles are unavailable; build the outline from title/description/metadata only. "
+        )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You create hierarchical mind-map outlines as Markdown only. "
+                "Use # for the root title, ## and ### for sections, and - for bullet points. "
+                "Do not use code fences, tables, or links. Keep depth at most 4 levels and about 15-40 nodes. "
+                f"Write entirely in {lang}. Output ONLY the Markdown document, no explanation."
+                + meta_hint
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Video title: {title}\n\n"
+                f"Subtitles/Transcript/Metadata:\n{subtitles}\n\n"
+                f"Create a mind-map outline in {lang}."
+            ),
+        },
+    ]
+
+
+async def mindmap_markdown_stream(
+    title: str,
+    subtitles: str,
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> AsyncIterator[str]:
+    if not client:
+        raise RuntimeError("DeepSeek API key not configured")
+
+    stream = await client.chat.completions.create(
+        model="deepseek-chat",
+        messages=_mindmap_messages(
+            title,
+            subtitles,
+            output_language=output_language,
+            from_metadata_only=from_metadata_only,
+        ),
+        max_tokens=1500,
+        stream=True,
+    )
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
 async def translate_subtitle(text: str, target_language: str, *, from_description: bool = False) -> str:
     if not client:
         raise RuntimeError("DeepSeek API key not configured")

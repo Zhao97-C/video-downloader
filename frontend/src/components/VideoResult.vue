@@ -5,9 +5,11 @@ import {
   summarizeVideoStream,
   translateSubtitle,
   fetchSubtitles,
+  mindmapStream,
   type SubtitlesResponse,
 } from '../api'
 import { useAppStore } from '../stores/app'
+import MindMapViewer from './MindMapViewer.vue'
 
 const store = useAppStore()
 const router = useRouter()
@@ -86,6 +88,33 @@ let summarizeAbort: AbortController | null = null
 const translateResult = ref('')
 const translateLoading = ref(false)
 const aiOutputLang = ref('Chinese')
+
+const mindmapMarkdown = ref('')
+const mindmapLoading = ref(false)
+const mindmapError = ref('')
+const mindmapFromMetadata = ref(false)
+const mindmapLoaded = ref(false)
+const mindmapFullscreen = ref(false)
+let mindmapAbort: AbortController | null = null
+
+const isPro = computed(() => !!store.user?.isPro)
+
+const mindmapPreviewMarkdown = computed(() => {
+  const title = props.data.title.replace(/[#\n]/g, ' ').trim() || 'Video'
+  return `# ${title}
+
+## Key topics
+- Main theme and context
+- Core arguments or steps
+
+## Highlights
+- Important detail A
+- Important detail B
+
+## Takeaways
+- Summary point 1
+- Summary point 2`
+})
 
 const subtitles = ref<SubtitlesResponse | null>(null)
 const subtitlesLoading = ref(false)
@@ -220,6 +249,42 @@ async function handleTranslate() {
     translateResult.value = `Error: ${e.response?.data?.detail || 'Failed to translate'}`
   } finally {
     translateLoading.value = false
+  }
+}
+
+async function handleMindmap() {
+  if (!store.isLoggedIn || !isPro.value) return
+  mindmapAbort?.abort()
+  mindmapAbort = new AbortController()
+  mindmapLoading.value = true
+  mindmapError.value = ''
+  mindmapMarkdown.value = ''
+  mindmapFromMetadata.value = false
+  try {
+    await mindmapStream(
+      props.data.task_id,
+      aiOutputLang.value,
+      {
+        onChunk: (text) => {
+          mindmapMarkdown.value += text
+        },
+        onDone: (meta) => {
+          mindmapFromMetadata.value = !!meta?.from_metadata_only
+          mindmapLoaded.value = true
+        },
+        onError: (message) => {
+          mindmapError.value = message
+        },
+      },
+      mindmapAbort.signal,
+    )
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    const msg = e instanceof Error ? e.message : 'Failed to generate mind map'
+    mindmapError.value = msg
+  } finally {
+    mindmapLoading.value = false
+    mindmapAbort = null
   }
 }
 </script>
@@ -389,6 +454,14 @@ async function handleTranslate() {
           >
             {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
           </button>
+          <button
+            v-if="isPro"
+            @click="handleMindmap"
+            :disabled="mindmapLoading"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
+          >
+            {{ mindmapLoading ? 'Building map...' : mindmapLoaded ? 'Refresh Mind Map' : 'Mind Map' }}
+          </button>
           <label class="flex items-center gap-1.5 text-xs text-text-secondary">
             <span class="whitespace-nowrap">Output</span>
             <select
@@ -417,7 +490,90 @@ async function handleTranslate() {
           <div class="font-medium text-text-primary mb-1.5 text-xs uppercase tracking-wider">Translation</div>
           {{ translateResult }}
         </div>
+
+        <!-- Mind Map -->
+        <div class="mt-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div class="font-medium text-text-primary text-xs uppercase tracking-wider flex items-center gap-2">
+              Mind Map <span class="pro-badge">PRO</span>
+            </div>
+            <button
+              v-if="isPro && mindmapLoaded && mindmapMarkdown"
+              type="button"
+              class="px-3 py-1.5 rounded-lg text-xs border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all"
+              @click="mindmapFullscreen = true"
+            >
+              Fullscreen
+            </button>
+          </div>
+
+          <div v-if="mindmapError" class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
+            {{ mindmapError }}
+          </div>
+
+          <div
+            v-if="mindmapFromMetadata && mindmapLoaded"
+            class="mb-3 px-3 py-2 rounded-lg text-xs text-amber-700 bg-amber-50 border border-amber-200"
+          >
+            Based on limited metadata (no timed subtitles).
+          </div>
+
+          <div class="relative rounded-xl border border-border overflow-hidden">
+            <div :class="{ 'blur-[6px] select-none pointer-events-none': !isPro }">
+              <MindMapViewer
+                :markdown="isPro && mindmapMarkdown && !mindmapLoading ? mindmapMarkdown : mindmapPreviewMarkdown"
+                :loading="isPro && mindmapLoading"
+                :interactive="isPro && !!mindmapMarkdown && !mindmapLoading"
+              />
+            </div>
+            <div
+              v-if="!isPro"
+              class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg-card/55 backdrop-blur-[2px] px-6 text-center"
+            >
+              <p class="text-sm text-text-primary font-medium">Visualize video structure as a mind map</p>
+              <p class="text-xs text-text-secondary max-w-sm">Upgrade to PRO to generate interactive maps from subtitles.</p>
+              <router-link
+                to="/pricing"
+                class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-sm hover:opacity-95 transition-opacity"
+              >
+                Upgrade to PRO
+              </router-link>
+            </div>
+            <div
+              v-else-if="isPro && !mindmapLoaded && !mindmapLoading"
+              class="absolute inset-0 flex items-center justify-center bg-bg-card/40 pointer-events-none"
+            >
+              <p class="text-xs text-text-secondary px-4 text-center">Click Mind Map to generate from subtitles</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- Mind map fullscreen -->
+    <Teleport to="body">
+      <div
+        v-if="mindmapFullscreen && mindmapMarkdown"
+        class="fixed inset-0 z-[100] flex flex-col bg-bg-primary"
+      >
+        <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+          <span class="text-sm font-medium text-text-primary">Mind Map</span>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary"
+            @click="mindmapFullscreen = false"
+          >
+            Close
+          </button>
+        </div>
+        <div class="flex-1 min-h-0 p-4">
+          <MindMapViewer
+            :markdown="mindmapMarkdown"
+            :interactive="true"
+            class="h-full"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

@@ -10,6 +10,7 @@ import {
 } from '../api'
 import { useAppStore } from '../stores/app'
 import MindMapViewer from './MindMapViewer.vue'
+import VideoChatPanel from './VideoChatPanel.vue'
 
 const store = useAppStore()
 const router = useRouter()
@@ -547,6 +548,14 @@ async function handleMindmap() {
             </div>
           </div>
         </div>
+
+        <VideoChatPanel
+          :task-id="data.task_id"
+          :title="data.title"
+          :output-language="aiOutputLang"
+          :is-pro="isPro"
+          :is-logged-in="store.isLoggedIn"
+        />
       </div>
     </div>
 

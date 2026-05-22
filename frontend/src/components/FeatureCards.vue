@@ -13,7 +13,7 @@ const features = [
   },
   {
     title: 'AI Summary',
-    desc: 'Get instant AI-powered video summaries, mind maps, and subtitle translations.',
+    desc: 'AI summaries, mind maps, video Q&A, and subtitle translations grounded in real transcripts.',
     icon: '◎',
     pro: true,
   },

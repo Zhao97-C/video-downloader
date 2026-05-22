@@ -218,6 +218,104 @@ export interface MindmapStreamCallbacks {
   onError?: (message: string) => void
 }
 
+export interface ChatStreamCallbacks {
+  onChunk: (text: string) => void
+  onDone?: (meta: { from_metadata_only?: boolean; questions_used?: number }) => void
+  onError?: (message: string) => void
+}
+
+export async function chatStream(
+  taskId: string,
+  message: string,
+  outputLanguage: string,
+  callbacks: ChatStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      task_id: taskId,
+      message,
+      output_language: outputLanguage,
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    const detail = err.detail
+    let messageText = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+        : `Failed (${res.status})`
+    if (res.status === 404 && (!messageText || messageText === 'Not Found')) {
+      messageText =
+        'Video Q&A API not available. Restart the backend (uvicorn) so /api/ai/chat is loaded.'
+    }
+    throw new Error(messageText || `Failed (${res.status})`)
+  }
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const processBlocks = (blocks: string[]) => {
+    for (const block of blocks) {
+      const parsed = parseSseBlock(block)
+      if (!parsed) continue
+      try {
+        const payload = JSON.parse(parsed.data) as {
+          content?: string
+          done?: boolean
+          detail?: string
+          from_metadata_only?: boolean
+          questions_used?: number
+        }
+        if (parsed.event === 'error') {
+          callbacks.onError?.(payload.detail || 'Stream error')
+          return false
+        }
+        if (payload.content) callbacks.onChunk(payload.content)
+        if (payload.done) {
+          callbacks.onDone?.({
+            from_metadata_only: payload.from_metadata_only,
+            questions_used: payload.questions_used,
+          })
+        }
+      } catch {
+        // ignore malformed SSE frames
+      }
+    }
+    return true
+  }
+
+  const drainBuffer = () => {
+    buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    return processBlocks(blocks)
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    if (!drainBuffer()) return
+    if (done) {
+      buffer += decoder.decode()
+      drainBuffer()
+      break
+    }
+  }
+}
+
 export async function mindmapStream(
   taskId: string,
   outputLanguage: string,

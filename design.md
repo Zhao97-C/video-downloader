@@ -89,6 +89,7 @@ async def extract_video_info(url: str) -> dict:
 
 - **字幕/转录展示**：登录用户可查看、复制带时间轴的字幕全文（引流能力，见第十章）
 - **视频总结**：调用 DeepSeek API 对字幕/转录文本进行 AI 总结（PRO）
+- **视频问答**：基于字幕/转录的多轮 AI 对话（PRO，见第十二章）
 - **字幕翻译**：基于真实字幕调用翻译 API（PRO，见第十章）
 - **批量下载**：PRO 用户支持播放列表批量解析
 
@@ -155,6 +156,7 @@ video-downloader/
 - `POST /api/ai/subtitles` - 获取字幕/转录文本（登录用户，带时间轴）
 - `POST /api/ai/summarize` - 视频总结（PRO，`task_id`）
 - `POST /api/ai/translate-subtitle` - 字幕翻译（PRO，`task_id` + `target_language`）
+- `POST /api/ai/chat` - 视频内容 AI 问答（PRO，SSE，`task_id` + `message`，每 task 最多 10 问）
 
 ## 七、开发分步计划
 
@@ -564,3 +566,102 @@ task["mindmap_cache"] = {
 | 前端 PRO | 流式累积后可交互缩放；全屏可用；换语言重新生成 |
 | 前端非 PRO | 模糊预览 + 跳转 Pricing，无 API 调用 |
 | 边界 | 无字幕/metadata 降级有提示；task 过期 404 |
+
+---
+
+## 十二、视频内容 AI 问答（已评审确认）
+
+> 评审结论（2026-05）：非 PRO **模糊预览 + 升级 CTA**；会话仅存 **task 内存**（无清空 API，重新解析即新会话）；**每 task 最多 10 问**；UI 为 AI Tools 内 **折叠 Video Q&A 面板**；MVP 带 **3 个建议问题 chips**；权限与总结/导图一致（登录 + `is_pro`，白名单经 JWT `_apply_whitelist`）。
+
+### 12.1 功能目标
+
+在 `VideoResult.vue` 的 **AI Tools（PRO）** 区域新增 **针对当前视频内容的对话式问答**：
+
+- 基于字幕/转录（`SubtitleBundle` 缓存 + `text_for_ai`）多轮追问
+- 无 timed 字幕时与总结相同，允许 metadata 降级（`from_metadata_only`）
+
+**不做**：跨视频知识库、语音输入、时间戳跳转播放、问答持久化到 DB、导出聊天记录、清空会话 API。
+
+### 12.2 权限模型
+
+| 能力 | 免费 | 登录非 PRO | PRO / 白名单 |
+|------|------|------------|--------------|
+| 模糊预览 + 升级 CTA | ✓ | ✓ | — |
+| 发送问题 / 多轮对话 | — | — | ✓ |
+
+- 后端：`POST /api/ai/chat` 需登录 + `current_user.get("is_pro")`（403）
+- 白名单：`FEATURE_WHITELIST_EMAILS` → JWT `is_pro=true`，无需额外逻辑
+
+### 12.3 数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as VideoChatPanel
+  participant API as POST /api/ai/chat
+  participant Cache as task chat_history
+  participant DS as DeepSeek
+
+  alt 非 PRO
+    FE->>U: 示例对话模糊 + Upgrade CTA
+  else PRO 提问
+    U->>FE: message
+    FE->>API: SSE task_id, message, output_language
+    API->>API: 字幕缓存 + 10问校验
+    API->>Cache: append user/assistant
+    API->>DS: system+history
+    API-->>FE: SSE chunks + done
+  end
+```
+
+### 12.4 API 设计
+
+`POST /api/ai/chat`（PRO，SSE）
+
+**请求**：`{ "task_id", "message", "output_language": "Chinese" }`（`message` 1–2000 字符）
+
+**SSE**：`content` 片段、`done`（含 `from_metadata_only`）、`event: error`
+
+**task 缓存**：
+
+```python
+task["chat_history"] = [{"role": "user"|"assistant", "content": "..."}]
+```
+
+- 保留最近 **10 轮**（20 条）；超出从头部丢弃
+- **用量**：每 task **最多 10 次用户提问**，第 11 次返回 **429**
+
+**模型**：`deepseek-chat`，`max_tokens=1200`，`temperature=0.3`，流式
+
+### 12.5 前端设计
+
+| 项 | 方案 |
+|----|------|
+| 组件 | `VideoChatPanel.vue`（折叠面板、消息列表、输入、chips） |
+| 语言 | 共用 `aiOutputLang` |
+| 非 PRO | 静态示例对话 + `blur` + `/pricing` CTA，不调 API |
+| 未登录 | 引导 `/auth` |
+| 建议问题 | 3 chips：主要内容 / 步骤 / 结论 |
+
+### 12.6 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `design.md` | 本章 §12 |
+| `backend/app/services/ai.py` | `chat_video_stream`、history trim |
+| `backend/app/api/ai.py` | `POST /chat`、10 问限制 |
+| `frontend/src/api/index.ts` | `chatStream()` |
+| `frontend/src/components/VideoChatPanel.vue` | 新建 |
+| `frontend/src/components/VideoResult.vue` | 嵌入面板 |
+| `frontend/src/views/Pricing.vue` | PRO 权益 |
+| `frontend/src/components/FeatureCards.vue` | 文案 |
+| `README.md` | API 表 |
+
+### 12.7 验收标准
+
+| 步骤 | 标准 |
+|------|------|
+| 后端 | PRO 流式问答；第 11 问 429；非 PRO 403；白名单可用 |
+| 前端 PRO | 多轮、chips、流式、metadata 提示 |
+| 前端非 PRO | 模糊预览 + Pricing，无 API |
+| 边界 | task 过期 404；重新解析为新会话 |

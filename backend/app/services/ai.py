@@ -160,6 +160,87 @@ async def mindmap_markdown_stream(
             yield delta
 
 
+CHAT_MAX_HISTORY_TURNS = 10
+CHAT_MAX_QUESTIONS_PER_TASK = 10
+
+
+def trim_chat_history(history: list[dict[str, str]], *, max_turns: int = CHAT_MAX_HISTORY_TURNS) -> None:
+    max_messages = max_turns * 2
+    if len(history) > max_messages:
+        del history[: len(history) - max_messages]
+
+
+def count_user_questions(history: list[dict[str, str]]) -> int:
+    return sum(1 for m in history if m.get("role") == "user")
+
+
+def _chat_messages(
+    title: str,
+    subtitles: str,
+    history: list[dict[str, str]],
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> list[dict[str, str]]:
+    lang = _normalize_output_language(output_language)
+    meta_hint = ""
+    if from_metadata_only:
+        meta_hint = (
+            " Timed subtitles are unavailable; answer only from title/description/metadata. "
+            "Say clearly when the answer is based on limited metadata."
+        )
+    system = {
+        "role": "system",
+        "content": (
+            "You are a helpful assistant that answers questions about a specific video. "
+            "Use ONLY the video title and subtitles/transcript/metadata provided below. "
+            "If the answer is not supported by the text, say you cannot find it in the video content. "
+            "Do not invent facts. Be concise but complete. "
+            f"Respond entirely in {lang}."
+            + meta_hint
+        ),
+    }
+    context = {
+        "role": "user",
+        "content": (
+            f"Video title: {title}\n\n"
+            f"Subtitles/Transcript/Metadata:\n{subtitles}\n\n"
+            "(Answer follow-up questions based on the content above.)"
+        ),
+    }
+    return [system, context, *history]
+
+
+async def chat_video_stream(
+    title: str,
+    subtitles: str,
+    history: list[dict[str, str]],
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> AsyncIterator[str]:
+    if not client:
+        raise RuntimeError("DeepSeek API key not configured")
+
+    stream = await client.chat.completions.create(
+        model="deepseek-chat",
+        messages=_chat_messages(
+            title,
+            subtitles,
+            history,
+            output_language=output_language,
+            from_metadata_only=from_metadata_only,
+        ),
+        max_tokens=1200,
+        temperature=0.3,
+        stream=True,
+    )
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
 async def translate_subtitle(text: str, target_language: str, *, from_description: bool = False) -> str:
     if not client:
         raise RuntimeError("DeepSeek API key not configured")

@@ -10,6 +10,7 @@ A cross-platform video download web application powered by yt-dlp.
 - Subtitle / transcript viewer with timestamps (login)
 - AI video summaries (PRO)
 - Mind map visualization with Markmap (PRO)
+- Video content AI Q&A (PRO, up to 10 questions per video)
 - Subtitle translation (PRO)
 - Batch playlist downloads (PRO)
 - Mobile-friendly responsive design
@@ -68,6 +69,7 @@ docker-compose up -d
 | POST | /api/ai/summarize | AI video summary via SSE stream (PRO) |
 | POST | /api/ai/mindmap | AI mind map markdown via SSE stream (PRO, cached per task+language) |
 | POST | /api/ai/translate-subtitle | Subtitle translation (PRO, `task_id`) |
+| POST | /api/ai/chat | Video Q&A via SSE stream (PRO, max 10 questions per `task_id`) |
 
 ## License
 

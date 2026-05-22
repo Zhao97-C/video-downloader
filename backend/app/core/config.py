@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     DEEPSEEK_API_KEY: str = ""
 
+    # Bilibili login cookie (SESSDATA value) — required for many AI/CC subtitles
+    BILIBILI_SESSDATA: str = ""
+
     # Comma-separated emails that get full-feature access without paid subscription
     FEATURE_WHITELIST_EMAILS: str = ""
 

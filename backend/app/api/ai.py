@@ -3,19 +3,20 @@ from pydantic import BaseModel
 
 from app.core.security import get_current_user
 from app.schemas.subtitle import SubtitlesResponse
-from app.services.ai import (
-    summarize_video,
-    translate_subtitle,
-    extract_subtitles_for_ai,
-)
+from app.services.ai import summarize_video, translate_subtitle
 from app.services.download import get_task
-from app.services.subtitle import fetch_subtitles_for_task, flatten_for_ai, get_or_extract_subtitles
+from app.services.subtitle import (
+    fetch_subtitles_for_task,
+    get_or_extract_subtitles,
+    text_for_ai,
+)
 
 router = APIRouter()
 
 
 class SummarizeRequest(BaseModel):
     task_id: str
+    output_language: str = "Chinese"
 
 
 class SubtitlesRequest(BaseModel):
@@ -50,11 +51,19 @@ async def summarize(req: SummarizeRequest, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Task not found or expired")
 
     try:
-        subtitles = await extract_subtitles_for_ai(req.task_id, task)
+        bundle = await get_or_extract_subtitles(req.task_id, task, refresh_if_empty=True)
+        info = task.get("info", {})
+        subtitles = text_for_ai(bundle, info)
         if not subtitles.strip():
             raise HTTPException(status_code=404, detail="No subtitles or transcript available for this video")
-        title = task.get("info", {}).get("title", "Video")
-        result = await summarize_video(title, subtitles)
+        title = info.get("title", "Video")
+        from_metadata = bundle.source == "none"
+        result = await summarize_video(
+            title,
+            subtitles,
+            output_language=req.output_language,
+            from_metadata_only=from_metadata,
+        )
         return AIResponse(result=result)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -70,14 +79,17 @@ async def translate(req: TranslateRequest, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Task not found or expired")
 
     try:
-        bundle = await get_or_extract_subtitles(req.task_id, task)
-        text = bundle.plain_text or flatten_for_ai(bundle)
+        bundle = await get_or_extract_subtitles(req.task_id, task, refresh_if_empty=True)
+        text = text_for_ai(bundle, task.get("info", {}))
         if not text.strip():
-            raise HTTPException(status_code=404, detail="No subtitles or transcript available for this video")
+            raise HTTPException(
+                status_code=404,
+                detail="No subtitles or transcript available for this video",
+            )
         result = await translate_subtitle(
             text,
             req.target_language,
-            from_description=bundle.source == "description",
+            from_description=not bundle.segments and bundle.source == "none",
         )
         return AIResponse(result=result)
     except RuntimeError as e:

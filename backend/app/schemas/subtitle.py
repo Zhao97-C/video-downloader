@@ -19,4 +19,5 @@ class SubtitlesResponse(BaseModel):
     char_count: int = 0
     truncated: bool = False
     has_timestamps: bool = True
-    extraction_method: str | None = None  # platform_api | ytdlp
+    extraction_method: str | None = None  # platform_api | ytdlp | bilibili_api
+    hint: str | None = None

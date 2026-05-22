@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import tempfile
+import time
+from urllib.parse import urlencode
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from html import unescape
@@ -17,6 +20,7 @@ _BVID_RE = re.compile(r"BV[\w]+", re.I)
 import httpx
 from yt_dlp import YoutubeDL
 
+from app.core.config import settings
 from app.schemas.subtitle import SubtitleSegment, SubtitleSource, SubtitlesResponse
 
 _executor = ThreadPoolExecutor(max_workers=3)
@@ -43,6 +47,7 @@ class SubtitleBundle:
     truncated: bool = False
     has_timestamps: bool = True
     extraction_method: str | None = None
+    hint: str | None = None
 
     def to_response(self) -> SubtitlesResponse:
         return SubtitlesResponse(
@@ -54,6 +59,7 @@ class SubtitleBundle:
             truncated=self.truncated,
             has_timestamps=self.has_timestamps,
             extraction_method=self.extraction_method,
+            hint=self.hint,
         )
 
     def to_cache(self) -> dict:
@@ -71,6 +77,7 @@ def _bundle_from_cache(data: dict) -> SubtitleBundle:
         truncated=data.get("truncated", False),
         has_timestamps=data.get("has_timestamps", True),
         extraction_method=data.get("extraction_method"),
+        hint=data.get("hint"),
     )
 
 
@@ -87,8 +94,16 @@ def _is_bilibili(info: dict, url: str) -> bool:
     return "bilibili" in extractor or "bilibili" in host
 
 
+_WBI_MIXIN_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52,
+]
+
+
 def _bilibili_api_headers() -> dict[str, str]:
-    return {
+    headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -96,10 +111,43 @@ def _bilibili_api_headers() -> dict[str, str]:
         "Referer": "https://www.bilibili.com/",
         "Origin": "https://www.bilibili.com",
     }
+    if settings.BILIBILI_SESSDATA:
+        headers["Cookie"] = f"SESSDATA={settings.BILIBILI_SESSDATA}"
+    return headers
 
 
-def _bilibili_player_subtitles(bvid: str) -> tuple[list[dict], str | None]:
-    """Query Bilibili player API for subtitle tracks. Returns (tracks, cid)."""
+def _get_wbi_mixin_key(client: httpx.Client) -> str | None:
+    try:
+        resp = client.get(
+            "https://api.bilibili.com/x/web-interface/nav",
+            headers=_bilibili_api_headers(),
+        )
+        resp.raise_for_status()
+        wbi = (resp.json().get("data") or {}).get("wbi_img") or {}
+        img_key = (wbi.get("img_url") or "").rsplit("/", 1)[-1].split(".")[0]
+        sub_key = (wbi.get("sub_url") or "").rsplit("/", 1)[-1].split(".")[0]
+        lookup = img_key + sub_key
+        if len(lookup) < 64:
+            return None
+        return "".join(lookup[i] for i in _WBI_MIXIN_TAB)[:32]
+    except Exception:
+        return None
+
+
+def _sign_wbi_params(params: dict, mixin_key: str) -> dict:
+    signed = dict(params)
+    signed["wts"] = round(time.time())
+    filtered = {
+        k: "".join(c for c in str(v) if c not in "!'()*")
+        for k, v in sorted(signed.items())
+    }
+    query = urlencode(filtered)
+    filtered["w_rid"] = hashlib.md5(f"{query}{mixin_key}".encode()).hexdigest()
+    return filtered
+
+
+def _bilibili_player_subtitles(bvid: str) -> tuple[list[dict], str | None, bool]:
+    """Query Bilibili wbi player API. Returns (tracks, cid, need_login_subtitle)."""
     headers = _bilibili_api_headers()
     try:
         with httpx.Client(timeout=20, follow_redirects=True) as client:
@@ -112,27 +160,40 @@ def _bilibili_player_subtitles(bvid: str) -> tuple[list[dict], str | None]:
             data = view.json().get("data") or {}
             pages = data.get("pages") or []
             if not pages:
-                return [], None
+                return [], None, False
             cid = pages[0].get("cid")
+            aid = data.get("aid")
             if not cid:
-                return [], None
+                return [], None, False
+
+            params: dict = {"bvid": bvid, "cid": cid}
+            if aid:
+                params["aid"] = aid
+            mixin_key = _get_wbi_mixin_key(client)
+            if mixin_key:
+                params = _sign_wbi_params(params, mixin_key)
 
             player = client.get(
-                "https://api.bilibili.com/x/player/v2",
-                params={"bvid": bvid, "cid": cid},
+                "https://api.bilibili.com/x/player/wbi/v2",
+                params=params,
                 headers=headers,
             )
             player.raise_for_status()
-            subtitle = (player.json().get("data") or {}).get("subtitle") or {}
-            return subtitle.get("subtitles") or [], str(cid)
+            pdata = player.json().get("data") or {}
+            subtitle = pdata.get("subtitle") or {}
+            need_login = bool(pdata.get("need_login_subtitle"))
+            return subtitle.get("subtitles") or [], str(cid), need_login
     except Exception:
-        return [], None
+        return [], None, False
 
 
 def _pick_bilibili_track(tracks: list[dict]) -> dict | None:
     if not tracks:
         return None
-    priority = ["中文", "简体", "zh", "zh-cn", "zh-hans", "中文（简体）", "英文", "en"]
+    priority = [
+        "ai-zh", "中文", "简体", "zh", "zh-cn", "zh-hans",
+        "中文（自动生成）", "中文（简体）", "英文", "en",
+    ]
     for pref in priority:
         pl = pref.lower()
         for track in tracks:
@@ -162,12 +223,12 @@ def _fetch_bilibili_platform_subtitles(info: dict, page_url: str) -> SubtitleBun
     if not bvid:
         return None
 
-    tracks, _cid = _bilibili_player_subtitles(bvid)
+    tracks, _cid, need_login = _bilibili_player_subtitles(bvid)
     track = _pick_bilibili_track(tracks)
     if not track:
         return None
 
-    sub_url = track.get("subtitle_url") or ""
+    sub_url = track.get("subtitle_url_v2") or track.get("subtitle_url") or ""
     if sub_url.startswith("//"):
         sub_url = "https:" + sub_url
     if not sub_url:
@@ -204,7 +265,7 @@ def subtitle_meta_from_info(info: dict, url: str = "") -> tuple[bool, list[str] 
     if _is_bilibili(info, url):
         bvid = _extract_bvid(info.get("id") or "") or _extract_bvid(url)
         if bvid:
-            tracks, _ = _bilibili_player_subtitles(bvid)
+            tracks, _, _ = _bilibili_player_subtitles(bvid)
             if tracks:
                 api_langs = []
                 for t in tracks[:5]:
@@ -408,11 +469,18 @@ def _fetch_via_ytdlp(url: str, info: dict) -> SubtitleBundle | None:
         **_base_ydl_opts(),
         "writesubtitles": True,
         "writeautomaticsub": True,
+        "writeautosub": True,
         "subtitleslangs": LANG_PRIORITY,
         "subtitlesformat": "vtt/srt/best",
         "outtmpl": os.path.join(subs_dir, "%(id)s.%(ext)s"),
         "skip_download": True,
     }
+    if settings.BILIBILI_SESSDATA and _is_bilibili(info, url):
+        ydl_opts.setdefault("http_headers", {})
+        cookie = f"SESSDATA={settings.BILIBILI_SESSDATA}"
+        ydl_opts["http_headers"]["Cookie"] = (
+            f"{ydl_opts['http_headers'].get('Cookie', '')}; {cookie}".strip("; ")
+        )
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
@@ -503,22 +571,20 @@ def _format_time(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def _description_bundle(info: dict) -> SubtitleBundle:
-    desc = (info.get("description") or "").strip()
-    if not desc or desc == "-":
-        return SubtitleBundle(source="none", has_timestamps=False, extraction_method=None)
-    truncated = len(desc) > DISPLAY_MAX_CHARS
-    text = desc[:DISPLAY_MAX_CHARS]
-    return SubtitleBundle(
-        source="description",
-        language=None,
-        segments=[],
-        plain_text=text,
-        char_count=len(text),
-        truncated=truncated,
-        has_timestamps=False,
-        extraction_method="description",
-    )
+def _empty_bundle(info: dict, url: str) -> SubtitleBundle:
+    hint = None
+    if _is_bilibili(info, url):
+        _, _, need_login = _bilibili_player_subtitles(
+            _extract_bvid(info.get("id") or "") or _extract_bvid(url) or "",
+        )
+        if need_login and not settings.BILIBILI_SESSDATA:
+            hint = (
+                "Bilibili timed subtitles require login. "
+                "Set BILIBILI_SESSDATA in backend .env (browser cookie after login)."
+            )
+        elif need_login:
+            hint = "Bilibili subtitles need a valid BILIBILI_SESSDATA cookie. Please refresh it."
+    return SubtitleBundle(source="none", has_timestamps=False, extraction_method=None, hint=hint)
 
 
 def _extract_subtitles_sync(task_info: dict) -> SubtitleBundle:
@@ -538,11 +604,11 @@ def _extract_subtitles_sync(task_info: dict) -> SubtitleBundle:
     if bundle and bundle.segments:
         return bundle
 
-    return _description_bundle(info)
+    return _empty_bundle(info, url)
 
 
 def flatten_for_ai(bundle: SubtitleBundle) -> str:
-    if bundle.source == "none":
+    if bundle.source == "none" or bundle.source == "description":
         return ""
     if bundle.segments:
         text = " ".join(s.text for s in bundle.segments)
@@ -551,14 +617,49 @@ def flatten_for_ai(bundle: SubtitleBundle) -> str:
     return text[:AI_MAX_CHARS]
 
 
-async def get_or_extract_subtitles(task_id: str, task_info: dict) -> SubtitleBundle:
+def metadata_fallback_for_ai(info: dict) -> str:
+    """When no timed subtitles exist, use title/description for AI (legacy behavior)."""
+    parts: list[str] = []
+    title = (info.get("title") or "").strip()
+    if title:
+        parts.append(f"Title: {title}")
+    desc = (info.get("description") or "").strip()
+    if desc and desc != "-":
+        parts.append(f"Description:\n{desc[:6000]}")
+    channel = info.get("channel") or info.get("uploader")
+    if channel:
+        parts.append(f"Channel: {channel}")
+    tags = info.get("tags")
+    if tags and isinstance(tags, list):
+        parts.append("Tags: " + ", ".join(str(t) for t in tags[:20]))
+    return "\n\n".join(parts)[:AI_MAX_CHARS]
+
+
+def text_for_ai(bundle: SubtitleBundle, info: dict) -> str:
+    text = flatten_for_ai(bundle)
+    if text.strip():
+        return text
+    return metadata_fallback_for_ai(info)
+
+
+async def get_or_extract_subtitles(
+    task_id: str,
+    task_info: dict,
+    *,
+    refresh_if_empty: bool = False,
+) -> SubtitleBundle:
     cached = task_info.get("subtitles_bundle")
     if cached:
-        return _bundle_from_cache(cached)
+        bundle = _bundle_from_cache(cached)
+        if not refresh_if_empty or bundle.source not in ("none", "description"):
+            return bundle
+        task_info.pop("subtitles_bundle", None)
 
     loop = asyncio.get_event_loop()
     bundle = await loop.run_in_executor(_executor, _extract_subtitles_sync, task_info)
-    task_info["subtitles_bundle"] = bundle.to_cache()
+    # Do not cache empty results so AI / retry can run extraction again.
+    if bundle.source not in ("none", "description"):
+        task_info["subtitles_bundle"] = bundle.to_cache()
     return bundle
 
 

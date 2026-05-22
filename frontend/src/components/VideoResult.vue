@@ -84,7 +84,7 @@ const aiSummary = ref('')
 const aiLoading = ref(false)
 const translateResult = ref('')
 const translateLoading = ref(false)
-const translateLang = ref('Chinese')
+const aiOutputLang = ref('Chinese')
 
 const subtitles = ref<SubtitlesResponse | null>(null)
 const subtitlesLoading = ref(false)
@@ -180,7 +180,7 @@ async function handleSummarize() {
   }
   aiLoading.value = true
   try {
-    const res = await summarizeVideo(props.data.task_id)
+    const res = await summarizeVideo(props.data.task_id, aiOutputLang.value)
     aiSummary.value = res.result
   } catch (e: any) {
     aiSummary.value = `Error: ${e.response?.data?.detail || 'Failed to generate summary'}`
@@ -196,7 +196,7 @@ async function handleTranslate() {
   }
   translateLoading.value = true
   try {
-    const res = await translateSubtitle(props.data.task_id, translateLang.value)
+    const res = await translateSubtitle(props.data.task_id, aiOutputLang.value)
     translateResult.value = res.result
   } catch (e: any) {
     translateResult.value = `Error: ${e.response?.data?.detail || 'Failed to translate'}`
@@ -330,17 +330,14 @@ async function handleTranslate() {
           </div>
 
           <div
-            v-if="subtitles.source === 'description'"
-            class="px-4 py-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-100"
-          >
-            No timed subtitles found — showing video description instead.
-          </div>
-
-          <div
             v-if="subtitles.source === 'none'"
-            class="p-4 text-sm text-text-secondary"
+            class="p-4 text-sm text-text-secondary space-y-2"
           >
-            No subtitles or transcript available for this video.
+            <p>No timed subtitles could be extracted for this video.</p>
+            <p v-if="subtitles.hint" class="text-xs text-amber-700">{{ subtitles.hint }}</p>
+            <p v-else-if="data.platform?.toLowerCase().includes('bilibili')" class="text-xs text-amber-700">
+              Bilibili CC/AI subtitles often require <code class="text-xs">BILIBILI_SESSDATA</code> in backend .env.
+            </p>
           </div>
 
           <div
@@ -367,23 +364,27 @@ async function handleTranslate() {
           >
             {{ aiLoading ? 'Summarizing...' : 'AI Summary' }}
           </button>
-          <select
-            v-model="translateLang"
-            class="px-3 py-2 rounded-lg text-sm border border-border bg-bg-input text-text-primary"
-          >
-            <option value="Chinese">Chinese</option>
-            <option value="English">English</option>
-            <option value="Japanese">Japanese</option>
-            <option value="Korean">Korean</option>
-            <option value="Spanish">Spanish</option>
-          </select>
           <button
             @click="handleTranslate"
             :disabled="translateLoading"
             class="px-4 py-2 rounded-lg text-sm border border-border bg-bg-input hover:border-border-strong text-text-primary transition-all disabled:opacity-50"
           >
-            {{ translateLoading ? 'Translating...' : 'Translate' }}
+            {{ translateLoading ? 'Translating...' : 'Translate Subtitles' }}
           </button>
+          <label class="flex items-center gap-1.5 text-xs text-text-secondary">
+            <span class="whitespace-nowrap">Output</span>
+            <select
+              v-model="aiOutputLang"
+              class="px-3 py-2 rounded-lg text-sm border border-border bg-bg-input text-text-primary"
+              title="Summary and translation output language"
+            >
+              <option value="Chinese">Chinese</option>
+              <option value="English">English</option>
+              <option value="Japanese">Japanese</option>
+              <option value="Korean">Korean</option>
+              <option value="Spanish">Spanish</option>
+            </select>
+          </label>
         </div>
 
         <div v-if="aiSummary" class="mt-4 p-4 rounded-xl bg-bg-input border border-border text-text-secondary text-sm leading-relaxed whitespace-pre-wrap">

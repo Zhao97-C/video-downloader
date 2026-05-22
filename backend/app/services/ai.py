@@ -1,7 +1,7 @@
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.services.subtitle import flatten_for_ai, get_or_extract_subtitles
+from app.services.subtitle import get_or_extract_subtitles, text_for_ai
 
 client = AsyncOpenAI(
     api_key=settings.DEEPSEEK_API_KEY,
@@ -10,13 +10,33 @@ client = AsyncOpenAI(
 
 
 async def extract_subtitles_for_ai(task_id: str, task_info: dict) -> str:
-    bundle = await get_or_extract_subtitles(task_id, task_info)
-    return flatten_for_ai(bundle)
+    bundle = await get_or_extract_subtitles(task_id, task_info, refresh_if_empty=True)
+    return text_for_ai(bundle, task_info.get("info", {}))
 
 
-async def summarize_video(title: str, subtitles: str) -> str:
+def _normalize_output_language(language: str) -> str:
+    if language.lower() in ("chinese", "zh", "zh-cn", "简体中文"):
+        return "Simplified Chinese"
+    return language
+
+
+async def summarize_video(
+    title: str,
+    subtitles: str,
+    *,
+    output_language: str = "Chinese",
+    from_metadata_only: bool = False,
+) -> str:
     if not client:
         raise RuntimeError("DeepSeek API key not configured")
+
+    lang = _normalize_output_language(output_language)
+    meta_hint = ""
+    if from_metadata_only:
+        meta_hint = (
+            " Timed subtitles are not available; summarize from the title/description/metadata only. "
+            "State that the summary is based on limited metadata if appropriate."
+        )
 
     response = await client.chat.completions.create(
         model="deepseek-chat",
@@ -26,15 +46,18 @@ async def summarize_video(title: str, subtitles: str) -> str:
                 "content": (
                     "You are a helpful assistant that summarizes video content. "
                     "Provide a concise, well-structured summary with key points. "
-                    "Use bullet points for clarity."
+                    "Use bullet points for clarity. "
+                    f"You MUST write the entire summary in {lang} only. "
+                    "Do not respond in any other language."
+                    + meta_hint
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"Video title: {title}\n\n"
-                    f"Subtitles/Transcript:\n{subtitles}\n\n"
-                    f"Please provide a summary of this video."
+                    f"Subtitles/Transcript/Metadata:\n{subtitles}\n\n"
+                    f"Please provide a summary of this video in {lang}."
                 ),
             },
         ],

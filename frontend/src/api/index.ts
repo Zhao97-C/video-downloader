@@ -61,6 +61,7 @@ export interface SubtitlesResponse {
   truncated: boolean
   has_timestamps: boolean
   extraction_method: string | null
+  hint: string | null
 }
 
 export async function fetchSubtitles(taskId: string): Promise<SubtitlesResponse> {
@@ -68,8 +69,11 @@ export async function fetchSubtitles(taskId: string): Promise<SubtitlesResponse>
   return res.data
 }
 
-export async function summarizeVideo(taskId: string) {
-  const res = await api.post('/ai/summarize', { task_id: taskId })
+export async function summarizeVideo(taskId: string, outputLanguage: string = 'Chinese') {
+  const res = await api.post('/ai/summarize', {
+    task_id: taskId,
+    output_language: outputLanguage,
+  })
   return res.data
 }
 

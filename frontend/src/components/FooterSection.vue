@@ -3,7 +3,7 @@
 
 <template>
   <footer class="border-t border-border py-8 px-6 sm:px-8">
-    <div class="max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div class="page-content flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="flex items-center gap-2">
         <div class="w-5 h-5 bg-accent rounded flex items-center justify-center">
           <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">

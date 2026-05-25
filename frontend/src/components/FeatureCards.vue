@@ -13,9 +13,8 @@ const features = [
   },
   {
     title: 'AI Summary',
-    desc: 'Get instant AI-powered video summaries and subtitle translations.',
+    desc: 'Free: auto summaries in Chinese (3 videos/day). PRO: unlimited summaries, mind maps, Q&A, and translation.',
     icon: '◎',
-    pro: true,
   },
   {
     title: 'Batch Download',

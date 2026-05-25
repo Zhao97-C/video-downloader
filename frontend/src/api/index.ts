@@ -69,12 +69,152 @@ export async function fetchSubtitles(taskId: string): Promise<SubtitlesResponse>
   return res.data
 }
 
-export async function summarizeVideo(taskId: string, outputLanguage: string = 'Chinese') {
-  const res = await api.post('/ai/summarize', {
-    task_id: taskId,
-    output_language: outputLanguage,
+export interface SummarizeStreamCallbacks {
+  onChunk: (text: string) => void
+  onDone?: (meta?: { from_metadata_only?: boolean; cached?: boolean }) => void
+  onError?: (message: string) => void
+}
+
+function parseSseBlock(block: string): { event: string; data: string } | null {
+  const lines = block.split('\n').filter(Boolean)
+  if (!lines.length) return null
+  let event = 'message'
+  const dataLines: string[] = []
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim())
+    }
+  }
+  if (!dataLines.length) return null
+  return { event, data: dataLines.join('\n') }
+}
+
+/** AI summary is always generated in Simplified Chinese (server-enforced). */
+export async function summarizeVideoStream(
+  taskId: string,
+  callbacks: SummarizeStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch('/api/ai/summarize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      task_id: taskId,
+      output_language: 'Chinese',
+    }),
+    signal,
   })
-  return res.data
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    const detail = errBody.detail
+    const message = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+        : `Failed (${res.status})`
+    const error = new Error(message || `Failed (${res.status})`) as Error & { status?: number }
+    error.status = res.status
+    throw error
+  }
+
+  const contentType = res.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    const data = await res.json() as { result?: string; detail?: string }
+    if (data.result) {
+      callbacks.onChunk(data.result)
+      callbacks.onDone?.()
+      return
+    }
+    throw new Error(
+      typeof data.detail === 'string' ? data.detail : 'Empty summary response',
+    )
+  }
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const processBlocks = (blocks: string[]) => {
+    for (const block of blocks) {
+      const parsed = parseSseBlock(block)
+      if (!parsed) continue
+      try {
+        const payload = JSON.parse(parsed.data) as {
+          content?: string
+          done?: boolean
+          detail?: string
+          from_metadata_only?: boolean
+          cached?: boolean
+        }
+        if (parsed.event === 'error') {
+          callbacks.onError?.(payload.detail || 'Stream error')
+          return false
+        }
+        if (payload.content) callbacks.onChunk(payload.content)
+        if (payload.done) {
+          callbacks.onDone?.({
+            from_metadata_only: payload.from_metadata_only,
+            cached: payload.cached,
+          })
+        }
+      } catch {
+        // ignore malformed SSE frames
+      }
+    }
+    return true
+  }
+
+  const drainBuffer = () => {
+    buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    return processBlocks(blocks)
+  }
+
+  const readRest = async () => {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (value) buffer += decoder.decode(value, { stream: true })
+      if (!drainBuffer()) return
+      if (done) {
+        buffer += decoder.decode()
+        drainBuffer()
+        break
+      }
+    }
+  }
+
+  const first = await reader.read()
+  if (first.value) buffer += decoder.decode(first.value, { stream: true })
+
+  if (buffer.trimStart().startsWith('{')) {
+    await readRest()
+    const data = JSON.parse(buffer) as { result?: string; detail?: string }
+    if (data.result) {
+      callbacks.onChunk(data.result)
+      callbacks.onDone?.()
+      return
+    }
+    throw new Error(
+      typeof data.detail === 'string' ? data.detail : 'Empty summary response',
+    )
+  }
+
+  if (!drainBuffer()) return
+  if (!first.done) await readRest()
+  else {
+    buffer += decoder.decode()
+    drainBuffer()
+  }
 }
 
 export async function translateSubtitle(taskId: string, targetLanguage: string = 'Chinese') {
@@ -85,9 +225,199 @@ export async function translateSubtitle(taskId: string, targetLanguage: string =
   return res.data
 }
 
+export interface MindmapStreamCallbacks {
+  onChunk: (text: string) => void
+  onDone?: (meta: { from_metadata_only?: boolean; cached?: boolean }) => void
+  onError?: (message: string) => void
+}
+
+export interface ChatStreamCallbacks {
+  onChunk: (text: string) => void
+  onDone?: (meta: { from_metadata_only?: boolean; questions_used?: number }) => void
+  onError?: (message: string) => void
+}
+
+export async function chatStream(
+  taskId: string,
+  message: string,
+  outputLanguage: string,
+  callbacks: ChatStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      task_id: taskId,
+      message,
+      output_language: outputLanguage,
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    const detail = err.detail
+    let messageText = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+        : `Failed (${res.status})`
+    if (res.status === 404 && (!messageText || messageText === 'Not Found')) {
+      messageText =
+        'Video Q&A API not available. Restart the backend (uvicorn) so /api/ai/chat is loaded.'
+    }
+    throw new Error(messageText || `Failed (${res.status})`)
+  }
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const processBlocks = (blocks: string[]) => {
+    for (const block of blocks) {
+      const parsed = parseSseBlock(block)
+      if (!parsed) continue
+      try {
+        const payload = JSON.parse(parsed.data) as {
+          content?: string
+          done?: boolean
+          detail?: string
+          from_metadata_only?: boolean
+          questions_used?: number
+        }
+        if (parsed.event === 'error') {
+          callbacks.onError?.(payload.detail || 'Stream error')
+          return false
+        }
+        if (payload.content) callbacks.onChunk(payload.content)
+        if (payload.done) {
+          callbacks.onDone?.({
+            from_metadata_only: payload.from_metadata_only,
+            questions_used: payload.questions_used,
+          })
+        }
+      } catch {
+        // ignore malformed SSE frames
+      }
+    }
+    return true
+  }
+
+  const drainBuffer = () => {
+    buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    return processBlocks(blocks)
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    if (!drainBuffer()) return
+    if (done) {
+      buffer += decoder.decode()
+      drainBuffer()
+      break
+    }
+  }
+}
+
+export async function mindmapStream(
+  taskId: string,
+  outputLanguage: string,
+  callbacks: MindmapStreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch('/api/ai/mindmap', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      task_id: taskId,
+      output_language: outputLanguage,
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    const detail = err.detail
+    const message = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ')
+        : `Failed (${res.status})`
+    throw new Error(message || `Failed (${res.status})`)
+  }
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const processBlocks = (blocks: string[]) => {
+    for (const block of blocks) {
+      const parsed = parseSseBlock(block)
+      if (!parsed) continue
+      try {
+        const payload = JSON.parse(parsed.data) as {
+          content?: string
+          done?: boolean
+          detail?: string
+          from_metadata_only?: boolean
+          cached?: boolean
+        }
+        if (parsed.event === 'error') {
+          callbacks.onError?.(payload.detail || 'Stream error')
+          return false
+        }
+        if (payload.content) callbacks.onChunk(payload.content)
+        if (payload.done) {
+          callbacks.onDone?.({
+            from_metadata_only: payload.from_metadata_only,
+            cached: payload.cached,
+          })
+        }
+      } catch {
+        // ignore malformed SSE frames
+      }
+    }
+    return true
+  }
+
+  const drainBuffer = () => {
+    buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    return processBlocks(blocks)
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: true })
+    if (!drainBuffer()) return
+    if (done) {
+      buffer += decoder.decode()
+      drainBuffer()
+      break
+    }
+  }
+}
+
 export interface SiteConfig {
   site_name: string
-  free_daily_limit: number
+  free_daily_summarize_limit: number
   free_max_resolution: number
   pro_monthly_price: string
   pro_monthly_period: string

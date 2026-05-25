@@ -47,7 +47,7 @@ graph TB
 
 - **配色**：深色主题为主（#0a0a0f 背景），搭配紫色-蓝色渐变高亮（#7c3aed -> #3b82f6），营造高级感
 - **布局**：居中大输入框 + 粘贴按钮，上方品牌 logo，下方功能选项
-- **付费引导**：免费用户每日 3 次下载，超出后显示优雅的升级弹窗；清晰度选项中，1080p+ 标记为 PRO
+- **付费引导**：下载次数不限（登录即可）；清晰度选项中，1080p+ 标记为 PRO；非 PRO 用户 AI 总结每日 3 次
 - **移动端**：响应式设计，底部 Tab 导航
 - **特色**：下载进度动画、支持平台图标展示、历史记录面板
 
@@ -76,8 +76,8 @@ async def extract_video_info(url: str) -> dict:
 ### 3.2 用户系统
 
 - JWT Token 认证
-- 免费用户：每日 3 次下载，最高 720p
-- PRO 用户：无限下载，最高 4K，优先队列
+- 免费用户：无限次下载，最高 720p；AI 总结每日 3 次（见 §13）
+- PRO 用户：无限下载，最高 4K，优先队列；AI 总结无限次
 
 ### 3.3 付费系统（Stripe）
 
@@ -88,7 +88,8 @@ async def extract_video_info(url: str) -> dict:
 ### 3.4 增值功能
 
 - **字幕/转录展示**：登录用户可查看、复制带时间轴的字幕全文（引流能力，见第十章）
-- **视频总结**：调用 DeepSeek API 对字幕/转录文本进行 AI 总结（PRO）
+- **视频总结**：调用 DeepSeek API 对字幕/转录文本进行 AI 总结（登录用户；免费每日 3 次/task，§13）
+- **视频问答**：基于字幕/转录的多轮 AI 对话（PRO，见第十二章）
 - **字幕翻译**：基于真实字幕调用翻译 API（PRO，见第十章）
 - **批量下载**：PRO 用户支持播放列表批量解析
 
@@ -153,8 +154,9 @@ video-downloader/
 - `POST /api/payment/create-checkout` - 创建 Stripe 支付会话
 - `POST /api/payment/webhook` - Stripe Webhook
 - `POST /api/ai/subtitles` - 获取字幕/转录文本（登录用户，带时间轴）
-- `POST /api/ai/summarize` - 视频总结（PRO，`task_id`）
+- `POST /api/ai/summarize` - 视频总结（登录，`task_id`，固定简体中文；免费见 §13）
 - `POST /api/ai/translate-subtitle` - 字幕翻译（PRO，`task_id` + `target_language`）
+- `POST /api/ai/chat` - 视频内容 AI 问答（PRO，SSE，`task_id` + `message`，每 task 最多 10 问）
 
 ## 七、开发分步计划
 
@@ -231,7 +233,7 @@ POST /api/parse (解析视频) → task_id
 
 ### 9.6 定价与权限
 
-- AI 总结功能仅 PRO 用户可用（保持不变）
+- ~~AI 总结功能仅 PRO 用户可用~~ → 已改为 **登录用户可用**，详见 **§13**
 - DeepSeek 成本极低（约为 GPT-4o-mini 的 1/10），不会对盈利能力产生实质影响
 
 ---
@@ -258,7 +260,7 @@ POST /api/parse (解析视频) → task_id
 | 解析后查看字幕可用性徽章 | ✓ | ✓ | ✓ |
 | 查看字幕全文（带时间轴） | — | ✓ | ✓ |
 | 复制字幕 | — | ✓ | ✓ |
-| AI 总结 | — | — | ✓ |
+| AI 总结 | — | ✓（每日 3 次，与 task 绑定，§13） | ✓（无限） |
 | 字幕翻译 | — | — | ✓ |
 
 未登录点击「查看字幕」时，引导登录/注册（与商业化产品常见做法一致：用实用功能拉新，AI 能力锁 PRO）。
@@ -386,20 +388,30 @@ flatten_for_ai(bundle) -> str                    # 去时间轴、拼接，供 s
 
 ### 10.6 前端设计（`VideoResult.vue`）
 
-在 **格式选择** 与 **AI Tools** 之间新增 **「Subtitles / Transcript」** 区块：
+解析结果卡片采用 **横向 Tab**，避免每用一功能就在下方纵向堆叠：
 
-- **解析后**：根据 `has_subtitles` / `subtitle_languages` 显示徽章
+| 层级 | Tab | 内容 |
+|------|-----|------|
+| 主 | **Download**（默认） | 视频/音频格式网格 |
+| 主 | **Subtitles** | 查看/复制/时间轴切换 |
+| 主 | **AI Tools** | 输出语言 + 子 Tab（见 §11.6、§12.5） |
+
+- 内容区统一 `min-h-[280px]`、`max-h-[min(55vh,520px)]` 内滚动；主/子 Tab 小屏横向滚动
+- 点击功能按钮时自动切换到对应 Tab（如 View Subtitles → Subtitles；AI Summary → AI / Summary）
+
+**Subtitles 面板**：
+
+- **解析后**：顶部徽章仍根据 `has_subtitles` / `subtitle_languages`
 - **懒加载**：点击「查看字幕」再请求 `/api/ai/subtitles`（不阻塞 parse）
 - **默认展示**：**带时间轴**（`segments` → `formatTime(start) + text`）
 - **可切换**：「仅纯文本」模式使用 `plain_text`
 - **操作**：复制全文（登录用户）；未登录引导登录
 - **空状态**：`source=none` 友好提示；`description` 显示降级提示条
-- **样式**：延续 `bg-bg-input`、`border-border`；移动端字幕区 `max-h: 40vh`
 
 **AI 区块联动**：
 
 - `translateSubtitle(taskId, targetLanguage)` 替代原 `text` 参数
-- 翻译结果展示在 AI Tools 区域，标注「基于字幕 · 语言对」
+- 各 AI 子功能仅在对应子 Tab 面板内展示结果（Summary / Translate / Mind Map / Q&A）
 
 ### 10.7 改动文件清单
 
@@ -437,3 +449,336 @@ flatten_for_ai(bundle) -> str                    # 去时间轴、拼接，供 s
 ### 10.10 与 Phase 计划关系
 
 本功能归入 **Phase 5 增值功能** 的子项，在「视频总结 + 字幕翻译」已落地基础上补齐**展示层**与**翻译 API 修正**，不单独开 Phase。
+
+---
+
+## 十一、Markmap 思维导图可视化（已评审确认）
+
+> 评审结论（2026-05）：API 采用 **SSE 流式**；同一 `task_id` + `output_language` **命中 task 内 markdown 缓存则直接返回**（不重复调 DeepSeek）；支持 **全屏查看**；非 PRO 展示 **模糊预览 + 升级 CTA**；输出语言与 AI Tools 的 **Output 下拉共用**。
+
+### 11.1 功能目标
+
+在 `VideoResult.vue` 的 **AI Tools（PRO）** 区域新增 **思维导图**：
+
+1. 后端从字幕/转录（`SubtitleBundle` 缓存）生成 **层级 Markdown 大纲**（DeepSeek）
+2. 前端用 **markmap-lib + markmap-view** 渲染可缩放、可拖拽 SVG 导图
+3. **PRO** 用户可生成、缓存复用、全屏查看；**非 PRO** 见模糊预览并引导 `/pricing`
+
+**不做**：导图导出 PNG/SVG、节点编辑器、基于翻译结果的二次导图。
+
+### 11.2 权限模型
+
+| 能力 | 免费 | 登录非 PRO | PRO |
+|------|------|------------|-----|
+| 模糊预览 + 升级 CTA | ✓ | ✓ | —（见完整导图） |
+| 生成 / 流式更新 / 全屏 | — | — | ✓ |
+
+- 后端：`POST /api/ai/mindmap` 需登录 + `is_pro`（403）
+- 前端：非 PRO 不调 API，用基于视频标题的 **本地示例 Markdown** + `blur` + 遮罩 CTA
+
+### 11.3 数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as VideoResult
+  participant API as POST /api/ai/mindmap
+  participant Cache as task mindmap_cache
+  participant DS as DeepSeek
+  participant MM as markmap-view
+
+  alt 非 PRO
+    FE->>MM: 标题生成示例 Markdown（模糊）
+    FE->>U: 升级 CTA → /pricing
+  else PRO 且缓存命中
+    U->>FE: 思维导图
+    FE->>API: SSE { task_id, output_language }
+    API->>Cache: 同语言 markdown 存在
+    API-->>FE: SSE 单帧 markdown + done(cached)
+    FE->>MM: 渲染
+  else PRO 首次生成
+    FE->>API: SSE
+    API->>API: get_or_extract_subtitles
+    API->>DS: 流式 Markdown
+    DS-->>API: chunks
+    API-->>FE: SSE content chunks
+    API->>Cache: 写入 mindmap_cache
+    API-->>FE: done
+    FE->>MM: 累积后渲染 / 流结束再 fit
+  end
+```
+
+### 11.4 API 设计
+
+`POST /api/ai/mindmap`（PRO，SSE）
+
+**请求**：`{ "task_id": "...", "output_language": "Chinese" }`（与 summarize 字段一致）
+
+**SSE 事件**（与 `/summarize` 同格式）：
+
+| 帧 | 含义 |
+|----|------|
+| `data: {"content":"..."}` | Markdown 片段（缓存命中时可为整段） |
+| `data: {"done":true,"from_metadata_only":false,"cached":true?}` | 结束；可选 `cached` 表示来自 task 缓存 |
+| `event: error` | 错误详情 |
+
+**task 级缓存**（与字幕同生命周期 ~30min）：
+
+```python
+task["mindmap_cache"] = {
+  "output_language": "Chinese",
+  "markdown": "# ...",
+  "from_metadata_only": false,
+}
+```
+
+- 仅当 `output_language` 与请求一致时命中；语言变更则重新生成并覆盖缓存
+- 流式生成结束后 strip ` ```markdown ` 围栏再写入缓存
+
+### 11.5 AI Prompt 要点
+
+- 只输出 Markdown：`#` / `##` / `###` 与 `-` 列表
+- 深度 ≤4，节点约 15–40
+- 语言：`output_language` → `_normalize_output_language`
+- 无字幕：与总结相同，允许 metadata 降级，`from_metadata_only: true`
+
+### 11.6 前端设计
+
+| 项 | 方案 |
+|----|------|
+| 依赖 | `markmap-lib`、`markmap-view`、`d3`；`import()` 动态加载 |
+| 组件 | `MindMapViewer.vue`：SVG 渲染、`fit()`、销毁实例 |
+| 全屏 | 按钮打开 `fixed inset-0 z-50` 遮罩，内嵌同一组件 |
+| 非 PRO | `previewMarkdown`（含 `data.title`）+ `blur-sm` + 遮罩「Upgrade to PRO」→ `/pricing` |
+| 语言 | 共用 `aiOutputLang`；切换语言后再次点击会 miss 缓存并重新生成 |
+| 入口 | AI Tools 主 Tab → **Mind Map** 子 Tab；按钮「Mind Map / 思维导图」 |
+| 布局 | 导图容器 `h-[min(50vh,400px)]`，与 Tab 内容区滚动分离 |
+
+### 11.7 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `design.md` | 本章 §11 |
+| `backend/app/services/ai.py` | `mindmap_markdown_stream`、围栏清理 |
+| `backend/app/api/ai.py` | `/mindmap` SSE、缓存读写 |
+| `frontend/package.json` | markmap 依赖 |
+| `frontend/src/api/index.ts` | `mindmapStream()` |
+| `frontend/src/components/MindMapViewer.vue` | 新建 |
+| `frontend/src/components/VideoResult.vue` | 导图区、全屏、预览 |
+| `frontend/src/components/FeatureCards.vue` | 文案 |
+| `frontend/src/views/Pricing.vue` | PRO 权益列表 |
+| `README.md` | API 表 |
+
+### 11.8 验收标准
+
+| 步骤 | 标准 |
+|------|------|
+| 后端 | PRO SSE 可生成；同 task+语言二次请求 `cached: true`；非 PRO 403 |
+| 前端 PRO | 流式累积后可交互缩放；全屏可用；换语言重新生成 |
+| 前端非 PRO | 模糊预览 + 跳转 Pricing，无 API 调用 |
+| 边界 | 无字幕/metadata 降级有提示；task 过期 404 |
+
+---
+
+## 十二、视频内容 AI 问答（已评审确认）
+
+> 评审结论（2026-05）：非 PRO **模糊预览 + 升级 CTA**；会话仅存 **task 内存**（无清空 API，重新解析即新会话）；**每 task 最多 10 问**；UI 为 AI Tools 内 **折叠 Video Q&A 面板**；MVP 带 **3 个建议问题 chips**；权限与总结/导图一致（登录 + `is_pro`，白名单经 JWT `_apply_whitelist`）。
+
+### 12.1 功能目标
+
+在 `VideoResult.vue` 的 **AI Tools（PRO）** 区域新增 **针对当前视频内容的对话式问答**：
+
+- 基于字幕/转录（`SubtitleBundle` 缓存 + `text_for_ai`）多轮追问
+- 无 timed 字幕时与总结相同，允许 metadata 降级（`from_metadata_only`）
+
+**不做**：跨视频知识库、语音输入、时间戳跳转播放、问答持久化到 DB、导出聊天记录、清空会话 API。
+
+### 12.2 权限模型
+
+| 能力 | 免费 | 登录非 PRO | PRO / 白名单 |
+|------|------|------------|--------------|
+| 模糊预览 + 升级 CTA | ✓ | ✓ | — |
+| 发送问题 / 多轮对话 | — | — | ✓ |
+
+- 后端：`POST /api/ai/chat` 需登录 + `current_user.get("is_pro")`（403）
+- 白名单：`FEATURE_WHITELIST_EMAILS` → JWT `is_pro=true`，无需额外逻辑
+
+### 12.3 数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as VideoChatPanel
+  participant API as POST /api/ai/chat
+  participant Cache as task chat_history
+  participant DS as DeepSeek
+
+  alt 非 PRO
+    FE->>U: 示例对话模糊 + Upgrade CTA
+  else PRO 提问
+    U->>FE: message
+    FE->>API: SSE task_id, message, output_language
+    API->>API: 字幕缓存 + 10问校验
+    API->>Cache: append user/assistant
+    API->>DS: system+history
+    API-->>FE: SSE chunks + done
+  end
+```
+
+### 12.4 API 设计
+
+`POST /api/ai/chat`（PRO，SSE）
+
+**请求**：`{ "task_id", "message", "output_language": "Chinese" }`（`message` 1–2000 字符）
+
+**SSE**：`content` 片段、`done`（含 `from_metadata_only`）、`event: error`
+
+**task 缓存**：
+
+```python
+task["chat_history"] = [{"role": "user"|"assistant", "content": "..."}]
+```
+
+- 保留最近 **10 轮**（20 条）；超出从头部丢弃
+- **用量**：每 task **最多 10 次用户提问**，第 11 次返回 **429**
+
+**模型**：`deepseek-chat`，`max_tokens=1200`，`temperature=0.3`，流式
+
+### 12.5 前端设计
+
+| 项 | 方案 |
+|----|------|
+| 组件 | `VideoChatPanel.vue`（`embedded` 嵌入 AI/Q&A 子 Tab；独立使用时仍可折叠） |
+| 布局 | AI Tools 主 Tab → **Q&A** 子 Tab；不依赖先执行 Summary 或 View Subtitles |
+| 语言 | 共用 `aiOutputLang` |
+| 非 PRO | 静态示例对话 + `blur` + `/pricing` CTA，不调 API |
+| 未登录 | 引导 `/auth` |
+| 建议问题 | 3 chips：主要内容 / 步骤 / 结论 |
+
+### 12.6 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `design.md` | 本章 §12 |
+| `backend/app/services/ai.py` | `chat_video_stream`、history trim |
+| `backend/app/api/ai.py` | `POST /chat`、10 问限制 |
+| `frontend/src/api/index.ts` | `chatStream()` |
+| `frontend/src/components/VideoChatPanel.vue` | 新建 |
+| `frontend/src/components/VideoResult.vue` | 嵌入面板 |
+| `frontend/src/views/Pricing.vue` | PRO 权益 |
+| `frontend/src/components/FeatureCards.vue` | 文案 |
+| `README.md` | API 表 |
+
+### 12.7 验收标准
+
+| 步骤 | 标准 |
+|------|------|
+| 后端 | PRO 流式问答；第 11 问 429；非 PRO 403；白名单可用 |
+| 前端 PRO | 多轮、chips、流式、metadata 提示 |
+| 前端非 PRO | 模糊预览 + Pricing，无 API |
+| 边界 | task 过期 404；重新解析为新会话 |
+
+---
+
+## 十三、AI 总结开放 + 左右分栏 + 解析后自动总结（已评审确认）
+
+> 评审结论（2026-05）：**未登录**使用任何功能均引导登录；**免费用户**每日 **3 次** AI 总结，与 **解析产生的 `task_id`** 绑定（同一 task 重复请求走缓存不计次）；**输出语言固定简体中文**；解析成功后 **左侧封面下自动流式总结**，右侧 **不再提供总结按钮**；AI Tools 主 Tab **去掉整体 PRO 角标**，仅 Translate / Mind Map / Q&A 子功能标 PRO。
+
+### 13.1 功能目标
+
+1. 将 **AI 总结** 向非 Pro **已登录** 用户开放，作为解析流程的默认增值体验
+2. 解析成功后布局：**左 40%** 视频信息 + 总结，**右 60%** 功能 Tab（Download / Subtitles / AI Tools）
+3. 搜索框位置与交互不变；首页主体统一 `page-content`（`max-width: 80rem` / 7xl），搜索框与结果区同宽
+4. 解析完成即自动请求总结，用户无需点击「AI Summary」
+
+**不变**：字幕翻译、思维导图、视频 Q&A 仍为 PRO；1080p+ 清晰度仍为 PRO。**下载**：所有已登录用户均不限次数（无每日下载配额）。
+
+### 13.2 权限与登录
+
+| 能力 | 未登录 | 免费（已登录） | PRO / 白名单 |
+|------|--------|----------------|--------------|
+| 解析视频 | 引导登录 | ✓ | ✓ |
+| 下载 / 查看字幕 / 复制 | 引导登录 | ✓ | ✓ |
+| AI 总结（自动） | 引导登录 | ✓，见 §13.3 | ✓，无限 |
+| 字幕翻译 / 导图 / Q&A | 引导登录 | 升级 PRO | ✓ |
+
+- **前端**：`DownloadBox` 提交解析、`VideoResult` 内下载/字幕/AI 等操作前统一 `router.push('/auth')` 或登录 CTA
+- **后端**：`POST /api/parse`、`GET /api/download/{task_id}`、`POST /api/ai/*` 均需 `get_current_user`（401）
+
+### 13.3 免费总结额度（与 task 绑定）
+
+- 配置：`FREE_DAILY_SUMMARIZE_LIMIT=3`（仅限制非 PRO 的 AI 总结；下载次数不限）
+- **计次规则**（免费用户）：
+  - 每个 **`task_id`**（一次解析）最多消耗 **1 次** 当日额度
+  - 同一 `task_id` 再次请求总结 → 读 **task 内 `summary_cache`**，SSE 直接返回缓存，**不重复计次**
+  - 当日已对 **3 个不同 `task_id`** 成功开始过总结后，第 4 个新 task → **429**
+- **PRO**：不限次数
+- **输出语言**：总结接口固定 `output_language="Chinese"`（简体中文），前端自动总结不传/忽略其他语言
+
+### 13.4 布局与自动总结数据流
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant FE as DownloadBox + VideoResult
+  participant API as FastAPI
+
+  U->>FE: 登录后提交链接
+  FE->>API: POST /api/parse (JWT)
+  API-->>FE: task_id + 元数据
+  FE->>FE: 左栏展示封面 + 总结 Loading
+  FE->>API: POST /api/ai/summarize { task_id } (固定 Chinese)
+  API->>API: 额度校验 / task 缓存
+  API-->>FE: SSE 流式 content
+  FE->>FE: 左栏 VideoSummaryPanel 更新
+```
+
+| 区域 | 内容 |
+|------|------|
+| 左栏 40% | 封面 `aspect-video`、标题/平台/时长/字幕徽章、**AI 总结区**（骨架/流式/错误/额度用尽 CTA） |
+| 右栏 60% | 主 Tab：Download（默认）/ Subtitles / AI Tools；AI 子 Tab：**Translate / Mind Map / Q&A**（**无 Summary**） |
+
+- 移动端 `< lg`：左栏（封面+总结）在上，右栏 Tab 在下
+- 组件：可选 `VideoSummaryPanel.vue` 承载左栏总结 UI
+
+### 13.5 API 改动
+
+`POST /api/ai/summarize`：
+
+| 维度 | 改前 | 改后 |
+|------|------|------|
+| PRO 校验 | 必须 `is_pro` | 删除；仅需登录 |
+| 额度 | 无 | 免费用户每日 3 task，§13.3 |
+| 缓存 | 无 | `task["summary_cache"]` 按 `user_id` 存全文，命中则 SSE 单帧返回 + `cached: true` |
+| 语言 | 请求可选 | 服务端强制 `Chinese`（可保留字段但忽略） |
+
+`POST /api/parse`、`GET /api/download/{task_id}`：增加 JWT 必填。
+
+公开配置 `GET /api/config` 增加 `free_daily_summarize_limit`。
+
+### 13.6 改动文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `design.md` | 本章 §13；§9.6、§10.2 权限表 |
+| `backend/app/core/config.py` | `FREE_DAILY_SUMMARIZE_LIMIT` |
+| `backend/app/services/summary_quota.py` | 新建：按用户+日+task 计次 |
+| `backend/app/api/ai.py` | summarize 开放、额度、缓存、固定中文 |
+| `backend/app/api/download.py` | parse/download 需登录 |
+| `backend/app/api/config.py` | 公开 summarize 限额 |
+| `frontend/src/components/DownloadBox.vue` | 登录校验、输入/结果宽度 |
+| `frontend/src/components/VideoResult.vue` | 4:6 布局、自动总结、去右侧 Summary |
+| `frontend/src/components/VideoSummaryPanel.vue` | 新建 |
+| `frontend/src/components/FeatureCards.vue` / `Pricing.vue` / `ProBanner.vue` | 文案 |
+| `frontend/src/stores/app.ts` | 可选展示 summarize 剩余次数 |
+
+### 13.7 验收标准
+
+| 步骤 | 标准 |
+|------|------|
+| 登录 | 未登录无法解析；结果页操作均引导 `/auth` |
+| 免费总结 | 解析后左栏自动流式总结（中文）；同日第 4 个新 task 返回 429 + 升级 CTA |
+| 缓存 | 同一 task 刷新页面不重复扣额度 |
+| PRO | 不限次数；翻译/导图/Q&A 仍 403（非 Pro） |
+| 布局 | 桌面 4:6；搜索框位置不变；右侧无总结按钮 |
+| AI Tab | 主 Tab 无 PRO 角标；子 Tab 仅 Translate/Mindmap/Q&A 标 PRO |

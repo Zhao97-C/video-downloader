@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
-const router = useRouter()
 const route = useRoute()
 const mobileOpen = ref(false)
 

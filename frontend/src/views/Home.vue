@@ -12,7 +12,7 @@ import FooterSection from '../components/FooterSection.vue'
     <main class="flex-1 pt-24 md:pt-16">
       <!-- Single centered column – mx-auto handles centering correctly
            inside the sidebar-offset content area -->
-      <div class="max-w-2xl mx-auto px-6 sm:px-10">
+      <div class="page-content">
         <HeroSection />
         <DownloadBox />
         <PlatformShowcase />

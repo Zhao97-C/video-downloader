@@ -12,6 +12,7 @@ from yt_dlp import YoutubeDL
 
 from app.core.config import settings
 from app.schemas.video import FormatInfo, ParseResponse
+from app.services.subtitle import subtitle_meta_from_info
 
 _executor = ThreadPoolExecutor(max_workers=settings.MAX_CONCURRENT_DOWNLOADS)
 _semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_DOWNLOADS)
@@ -187,6 +188,7 @@ async def parse_video(url: str, mode: str = "auto") -> ParseResponse:
 
     raw_duration = info.get("duration")
     duration = int(raw_duration) if raw_duration is not None else None
+    has_subtitles, subtitle_languages = subtitle_meta_from_info(info, url)
 
     return ParseResponse(
         title=info.get("title", "Unknown"),
@@ -195,6 +197,8 @@ async def parse_video(url: str, mode: str = "auto") -> ParseResponse:
         platform=info.get("extractor", "").split(":")[0] if info.get("extractor") else None,
         formats=formats,
         task_id=task_id,
+        has_subtitles=has_subtitles,
+        subtitle_languages=subtitle_languages,
     )
 
 

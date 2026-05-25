@@ -7,6 +7,7 @@ A cross-platform video download web application powered by yt-dlp.
 - Download videos from 1000+ platforms (YouTube, TikTok, Instagram, Twitter, Bilibili, etc.)
 - Multiple quality options up to 4K
 - Smart download mode (direct link / proxy / streaming)
+- Subtitle / transcript viewer with timestamps (login)
 - AI video summaries (PRO)
 - Subtitle translation (PRO)
 - Batch playlist downloads (PRO)
@@ -62,8 +63,9 @@ docker-compose up -d
 | GET | /api/auth/profile | User profile |
 | POST | /api/payment/create-checkout | Create Stripe checkout |
 | POST | /api/payment/webhook | Stripe webhook |
-| POST | /api/ai/summarize | AI video summary |
-| POST | /api/ai/translate-subtitle | Subtitle translation |
+| POST | /api/ai/subtitles | Fetch subtitles/transcript (login) |
+| POST | /api/ai/summarize | AI video summary (PRO) |
+| POST | /api/ai/translate-subtitle | Subtitle translation (PRO, `task_id`) |
 
 ## License
 

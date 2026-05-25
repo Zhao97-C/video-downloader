@@ -417,7 +417,6 @@ export async function mindmapStream(
 
 export interface SiteConfig {
   site_name: string
-  free_daily_limit: number
   free_daily_summarize_limit: number
   free_max_resolution: number
   pro_monthly_price: string

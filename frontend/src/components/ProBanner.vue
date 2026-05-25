@@ -10,7 +10,7 @@ const store = useAppStore()
         Limited Offer
       </div>
       <h2 class="text-2xl md:text-3xl font-bold mb-3 leading-snug">
-        Unlock unlimited downloads
+        Unlock PRO power tools
       </h2>
       <p class="text-white/65 mb-8 leading-relaxed text-sm max-w-sm">
         4K quality, batch downloads, unlimited AI summaries, mind maps, Q&A, and subtitle translation.

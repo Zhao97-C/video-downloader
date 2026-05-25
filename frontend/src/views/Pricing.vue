@@ -14,7 +14,7 @@ const plans = computed(() => {
       price: '$0',
       period: 'forever',
       features: [
-        `${cfg.free_daily_limit} downloads per day`,
+        'Unlimited downloads',
         `${cfg.free_daily_summarize_limit ?? 3} AI summaries per day (per video)`,
         `Up to ${cfg.free_max_resolution}p quality`,
         'Single video only',

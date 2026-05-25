@@ -8,7 +8,7 @@ A cross-platform video download web application powered by yt-dlp.
 - Multiple quality options up to 4K
 - Smart download mode (direct link / proxy / streaming)
 - Subtitle / transcript viewer with timestamps (login)
-- AI video summaries (PRO)
+- AI video summaries (3/day free, unlimited on PRO)
 - Mind map visualization with Markmap (PRO)
 - Video content AI Q&A (PRO, up to 10 questions per video)
 - Subtitle translation (PRO)

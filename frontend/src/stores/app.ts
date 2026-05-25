@@ -4,7 +4,6 @@ import { getProfile, getSiteConfig, type SiteConfig } from '../api'
 
 const DEFAULT_CONFIG: SiteConfig = {
   site_name: 'SaveAny',
-  free_daily_limit: 3,
   free_daily_summarize_limit: 3,
   free_max_resolution: 720,
   pro_monthly_price: '$9.9',
@@ -18,13 +17,9 @@ const DEFAULT_CONFIG: SiteConfig = {
 export const useAppStore = defineStore('app', () => {
   const user = ref<{ id: number; email: string; isPro: boolean } | null>(null)
   const token = ref<string | null>(localStorage.getItem('token'))
-  const dailyUsage = ref(parseInt(localStorage.getItem('dailyUsage') || '0'))
   const siteConfig = ref<SiteConfig>({ ...DEFAULT_CONFIG })
 
   const isLoggedIn = computed(() => !!token.value)
-  const canDownload = computed(
-    () => user.value?.isPro || dailyUsage.value < siteConfig.value.free_daily_limit,
-  )
 
   function setToken(t: string) {
     token.value = t
@@ -33,11 +28,6 @@ export const useAppStore = defineStore('app', () => {
 
   function setUser(u: { id: number; email: string; isPro: boolean } | null) {
     user.value = u
-  }
-
-  function incrementUsage() {
-    dailyUsage.value++
-    localStorage.setItem('dailyUsage', String(dailyUsage.value))
   }
 
   function logout() {
@@ -67,13 +57,10 @@ export const useAppStore = defineStore('app', () => {
   return {
     user,
     token,
-    dailyUsage,
     siteConfig,
     isLoggedIn,
-    canDownload,
     setToken,
     setUser,
-    incrementUsage,
     logout,
     fetchProfile,
     fetchConfig,

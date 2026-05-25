@@ -13,7 +13,7 @@ const features = [
   },
   {
     title: 'AI Summary',
-    desc: 'Free: auto video summaries in Chinese after each parse. PRO: mind maps, Q&A, and subtitle translation.',
+    desc: 'Free: auto summaries in Chinese (3 videos/day). PRO: unlimited summaries, mind maps, Q&A, and translation.',
     icon: '◎',
   },
   {
